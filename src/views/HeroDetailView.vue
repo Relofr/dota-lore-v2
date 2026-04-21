@@ -486,7 +486,7 @@ function fmt(n, decimals = 0) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px 4px 4px;
+  padding: 6px 12px;
   background: var(--color-card-bg);
   border: 1px solid var(--color-border);
   border-radius: 999px;
@@ -502,8 +502,8 @@ function fmt(n, decimals = 0) {
 }
 
 .related-chip-icon {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
   object-fit: cover;
   flex-shrink: 0;
