@@ -33,6 +33,9 @@ function cleanLore(raw) {
   return raw
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
+    .replace(/\\n/g, '\n')
+    .replace(/\\/g, '')
+    .replace(/(?<!\w)\/(?!\w)/g, '')
     .replace(/\t/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

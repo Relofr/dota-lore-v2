@@ -48,15 +48,13 @@ html {
 }
 
 @font-face {
-  font-family: "Reaver Regular";
-  src: local("Reaver Regular"), url("../fonts/Reaver-Regular.ttf");
+  font-family: "Reaver Bold";
+  src: url("https://github.com/Relofr/dota-lore-v2/blob/bd50ffc4355bf8da34a611a427e2ddf96df25357/src/assets/fonts/Reaver-Bold.ttf")
 }
 
 @font-face {
-  font-family: "Reaver Bold";
-  src:
-    local("Reaver Bold"),
-    url("../fonts/Reaver-Bold.ttf") format("truetype");
+  font-family: "Reaver Regular";
+  src: url("https://github.com/Relofr/dota-lore-v2/blob/main/src/assets/fonts/Reaver-Regular.ttf")
 }
 
 body {
