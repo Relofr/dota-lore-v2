@@ -104,7 +104,6 @@ const attributeIcons = {
   justify-content: center;
   border-bottom: 2px solid;
   font-size: 2rem;
-  font-weight: 700;
   color: var(--color-text-muted);
 }
 
