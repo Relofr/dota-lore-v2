@@ -58,7 +58,7 @@ const hasActiveFilters = computed(
     <div class="page-header">
       <h1>Heroes</h1>
       <p class="page-desc">
-        <template v-if="loading">Loading heroes from STRATZ…</template>
+        <template v-if="loading">Loading heroes…</template>
         <template v-else-if="error">{{ error }}</template>
         <template v-else>
           {{ heroes.length }} heroes
@@ -122,7 +122,7 @@ const hasActiveFilters = computed(
     </div>
 
     <div v-else-if="error" class="error-state">
-      <p>Failed to load heroes: {{ error }}</p>
+      <p>Failed to load heroes</p>
     </div>
 
     <div v-else-if="filteredHeroes.length === 0" class="empty-state">

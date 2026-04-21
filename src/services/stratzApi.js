@@ -58,7 +58,7 @@ export async function fetchStratzHeroes() {
     body: JSON.stringify({ query: HEROES_QUERY }),
   })
 
-  if (!resp.ok) throw new Error(`STRATZ API returned ${resp.status}`)
+  if (!resp.ok) throw new Error(`API returned ${resp.status}`)
   const json = await resp.json()
   if (json.errors?.length) throw new Error(json.errors[0].message)
   return json.data.constants
