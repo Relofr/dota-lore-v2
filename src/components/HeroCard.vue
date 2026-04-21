@@ -52,7 +52,7 @@ const attributeIcons = {
           :alt="hero.primaryAttribute"
         />
       </h3>
-      <p v-if="hero.realName !== hero.name" class="hero-real-name">{{ hero.realName }}</p>
+      <p class="hero-real-name">{{ hero.realName !== hero.name ? hero.realName : ' ' }}</p>
       <div class="hero-roles">
         <span v-for="role in hero.roles.slice(0, 3)" :key="role" class="role-tag">{{ role }}</span>
       </div>

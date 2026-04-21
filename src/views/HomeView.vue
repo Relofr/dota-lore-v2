@@ -6,7 +6,11 @@ import HeroCard from '@/components/HeroCard.vue'
 
 const { heroes, loading } = useHeroes()
 
-const featuredHeroes = computed(() => heroes.value.slice(0, 5))
+const featuredHeroes = computed(() => {
+  if (heroes.value.length <= 5) return heroes.value
+  const shuffled = [...heroes.value].sort(() => Math.random() - 0.5)
+  return shuffled.slice(0, 5)
+})
 </script>
 
 <template>
