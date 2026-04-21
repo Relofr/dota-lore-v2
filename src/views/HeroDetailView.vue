@@ -174,12 +174,13 @@ function fmt(n, decimals = 0) {
         </div>
       </div>
 
-      <div class="hero-portrait-wrap">
+      <div class="hero-portrait-wrap" :class="`portrait-${hero.id}`">
         <video
           :key="hero.id"
           class="hero-portrait-img"
           :poster="`https://cdn.steamstatic.com/apps/dota2/videos/dota_react/heroes/renders/${hero.id}.png`"
           autoplay
+          muted
           preload="auto"
           loop
           playsinline
@@ -272,9 +273,6 @@ function fmt(n, decimals = 0) {
   align-items: flex-start;
 }
 
-.hero-layout {
-  /* block — content flows left, portrait is fixed out of flow */
-}
 
 .hero-content {
   max-width: 680px;
@@ -285,6 +283,7 @@ function fmt(n, decimals = 0) {
   right: 0;
   top: 0;
   bottom: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -298,6 +297,16 @@ function fmt(n, decimals = 0) {
   object-fit: contain;
   display: block;
   pointer-events: auto;
+}
+
+.portrait-broodmother {
+  justify-content: flex-end;
+}
+
+.portrait-broodmother .hero-portrait-img {
+  object-fit: contain;
+  width: 48%;
+  margin-right: 2%;
 }
 
 @media (max-width: 900px) {

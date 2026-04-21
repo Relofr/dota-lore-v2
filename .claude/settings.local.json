@@ -19,7 +19,10 @@
       "Bash(curl -s -A \"Mozilla/5.0\" https://cdn.steamstatic.com/apps/dota2/sounds/vo/antimage/antimage_move_01.mp3 -w \"\\\\nHTTP Status: %{http_code}\\\\n\" -o /dev/null)",
       "Bash(curl -s -A \"Mozilla/5.0\" https://cdn.steamstatic.com/apps/dota2/sounds/antimage_move_01.mp3 -w \"\\\\nHTTP Status: %{http_code}\\\\n\" -o /dev/null)",
       "Bash(curl -s -A \"Mozilla/5.0\" https://cdn.steamstatic.com/apps/dota2/sounds/vo/antimage/move_01.mp3 -w \"\\\\nHTTP Status: %{http_code}\\\\n\" -o /dev/null)",
-      "Bash(curl -s -A \"Mozilla/5.0\" https://cdn.steamstatic.com/apps/dota2/sounds/vo_antimage_move_01.mp3 -w \"\\\\nHTTP Status: %{http_code}\\\\n\" -o /dev/null)"
+      "Bash(curl -s -A \"Mozilla/5.0\" https://cdn.steamstatic.com/apps/dota2/sounds/vo_antimage_move_01.mp3 -w \"\\\\nHTTP Status: %{http_code}\\\\n\" -o /dev/null)",
+      "Bash(curl -s -I \"https://cdn.steamstatic.com/apps/dota2/videos/dota_react/heroes/renders/broodmother.webm\")",
+      "Bash(curl -s -I \"https://cdn.steamstatic.com/apps/dota2/videos/dota_react/heroes/renders/antimage.webm\")",
+      "Bash(curl -s -I \"https://cdn.steamstatic.com/apps/dota2/videos/dota_react/heroes/renders/broodmother.png\")"
     ]
   }
 }
