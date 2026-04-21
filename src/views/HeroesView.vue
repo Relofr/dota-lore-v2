@@ -1,13 +1,26 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useHeroes, allRoles, allAttributes } from '@/composables/useHeroes.js'
 import HeroCard from '@/components/HeroCard.vue'
 
+const route = useRoute()
+const router = useRouter()
 const { heroes, loading, error } = useHeroes()
 
-const searchQuery = ref('')
-const selectedAttributes = ref([])
-const selectedRoles = ref([])
+const searchQuery = ref(route.query.q || '')
+const selectedAttributes = ref(route.query.attr ? [].concat(route.query.attr) : [])
+const selectedRoles = ref(route.query.role ? [].concat(route.query.role) : [])
+
+watch([searchQuery, selectedAttributes, selectedRoles], () => {
+  router.replace({
+    query: {
+      ...(searchQuery.value ? { q: searchQuery.value } : {}),
+      ...(selectedAttributes.value.length ? { attr: selectedAttributes.value } : {}),
+      ...(selectedRoles.value.length ? { role: selectedRoles.value } : {}),
+    }
+  })
+}, { deep: true })
 
 const filteredHeroes = computed(() => {
   return heroes.value.filter((hero) => {

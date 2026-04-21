@@ -10,8 +10,8 @@ const router = createRouter({
     { path: '/heroes', component: HeroesView },
     { path: '/heroes/:id', component: HeroDetailView },
   ],
-  scrollBehavior() {
-    return { top: 0 }
+  scrollBehavior(_to, _from, savedPosition) {
+    return savedPosition || { top: 0 }
   },
 })
 
