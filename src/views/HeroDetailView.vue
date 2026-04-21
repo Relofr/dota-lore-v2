@@ -489,7 +489,7 @@ function fmt(n, decimals = 0) {
   padding: 6px 12px;
   background: var(--color-card-bg);
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: 998px;
   text-decoration: none;
   color: var(--color-text);
   font-size: 0.78rem;
