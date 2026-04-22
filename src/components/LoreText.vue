@@ -27,9 +27,9 @@ const entities = computed(() => {
       displayName: hero.name,
       route: `/heroes/${hero.id}`,
       entityId: hero.id,
-      attr: hero.primaryAttribute,
+      // attr: hero.primaryAttribute,
       iconUrl: hero.iconUrl,
-      reason: "Mentioned in this hero's lore",
+      // reason: "Mentioned in this hero's lore",
     })
     if (hero.realName && hero.realName !== hero.name) {
       list.push({
@@ -37,9 +37,9 @@ const entities = computed(() => {
         displayName: hero.name,
         route: `/heroes/${hero.id}`,
         entityId: hero.id,
-        attr: hero.primaryAttribute,
+        // attr: hero.primaryAttribute,
         iconUrl: hero.iconUrl,
-        reason: "Mentioned in this hero's lore",
+        // reason: "Mentioned in this hero's lore",
       })
     }
   }
@@ -149,7 +149,7 @@ const paragraphs = computed(() =>
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 8px 12px;
-  min-width: 160px;
+  min-width: 120px;
   max-width: 240px;
   z-index: 200;
   display: flex;

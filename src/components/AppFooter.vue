@@ -1,12 +1,12 @@
 <template>
-  <footer class="app-footer">
+  <!-- <footer class="app-footer">
     <div class="footer-inner">
       <p class="footer-note">
         Dota 2 and all related content are property of Valve Corporation. This is a fan-made lore
         reference site.
       </p>
     </div>
-  </footer>
+  </footer> -->
 </template>
 
 <style scoped>

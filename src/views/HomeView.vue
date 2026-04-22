@@ -136,7 +136,7 @@ const featuredHeroes = computed(() => {
 
 .section-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: var(--spacing-lg);
   gap: var(--spacing-md);
@@ -168,7 +168,6 @@ const featuredHeroes = computed(() => {
   font-size: 0.85rem;
   white-space: nowrap;
   flex-shrink: 0;
-  align-self: flex-start;
 }
 
 .hero-grid {

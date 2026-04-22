@@ -4,6 +4,20 @@ import { useRoute, useRouter } from 'vue-router'
 import { useHeroes, allRoles, allAttributes } from '@/composables/useHeroes.js'
 import HeroCard from '@/components/HeroCard.vue'
 
+const ATTR_ICONS = {
+  strength:     'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png',
+  agility:      'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png',
+  intelligence: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_intelligence.png',
+  universal:    'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png',
+}
+
+const ATTR_LABELS = {
+  strength: 'Strength',
+  agility: 'Agility',
+  intelligence: 'Intelligence',
+  universal: 'Universal',
+}
+
 const route = useRoute()
 const router = useRouter()
 const { heroes, loading, error } = useHeroes()
@@ -29,7 +43,10 @@ const filteredHeroes = computed(() => {
       !q ||
       hero.name.toLowerCase().includes(q) ||
       (hero.realName && hero.realName.toLowerCase().includes(q)) ||
-      (hero.lore && hero.lore.toLowerCase().includes(q))
+      (hero.lore && hero.lore.toLowerCase().includes(q)) ||
+      hero.abilities.some(
+        a => a.displayName.toLowerCase().includes(q) || a.lore.toLowerCase().includes(q),
+      )
 
     const matchesAttribute =
       selectedAttributes.value.length === 0 ||
@@ -80,31 +97,40 @@ const hasActiveFilters = computed(
     </div>
 
     <div class="filters">
-      <input
-        v-model="searchQuery"
-        type="search"
-        class="search-input"
-        placeholder="Search by name or lore…"
-        :disabled="loading"
-      />
+      <div class="search-row">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M13 13L17 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <input
+            v-model="searchQuery"
+            type="search"
+            class="search-input"
+            placeholder="Search heroes, abilities, lore…"
+            :disabled="loading"
+          />
+        </div>
+        <button v-if="hasActiveFilters" class="clear-btn" @click="clearFilters">Clear</button>
+      </div>
 
-      <div class="filter-group">
-        <label>Attribute</label>
-        <div class="filter-buttons">
+      <div class="filter-row">
+        <div class="attr-group">
           <button
             v-for="attr in allAttributes"
             :key="attr"
             :class="['attr-btn', `attr-${attr}`, { active: selectedAttributes.includes(attr) }]"
+            :title="attr.charAt(0).toUpperCase() + attr.slice(1)"
             @click="toggleAttribute(attr)"
           >
-            {{ attr.charAt(0).toUpperCase() + attr.slice(1) }}
+            <img :src="ATTR_ICONS[attr]" :alt="attr" class="attr-icon" />
+            <span>{{ ATTR_LABELS[attr] }}</span>
           </button>
         </div>
-      </div>
 
-      <div class="filter-group">
-        <label>Role</label>
-        <div class="filter-buttons">
+        <div class="filter-divider" />
+
+        <div class="role-group">
           <button
             v-for="role in allRoles"
             :key="role"
@@ -114,19 +140,6 @@ const hasActiveFilters = computed(
             {{ role }}
           </button>
         </div>
-      </div>
-
-      <div v-if="hasActiveFilters" class="filter-actions">
-        <button class="clear-btn" @click="clearFilters">Clear all filters</button>
-        <span class="active-summary">
-          <template v-if="selectedAttributes.length">
-            {{ selectedAttributes.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join(', ') }}
-          </template>
-          <template v-if="selectedAttributes.length && selectedRoles.length"> · </template>
-          <template v-if="selectedRoles.length">
-            {{ selectedRoles.join(', ') }}
-          </template>
-        </span>
       </div>
     </div>
 
@@ -180,23 +193,43 @@ const hasActiveFilters = computed(
 .filters {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
+  gap: 10px;
   margin-bottom: var(--spacing-lg);
-  padding: var(--spacing-md);
-  background: var(--color-card-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+}
+
+/* Search row */
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.search-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  pointer-events: none;
 }
 
 .search-input {
   width: 100%;
-  height: 40px;
-  padding: 0 16px;
-  background: var(--color-bg);
+  height: 42px;
+  padding: 0 16px 0 38px;
+  background: var(--color-card-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--btn-radius);
+  border-radius: var(--radius);
   color: var(--color-text);
   font-size: 0.9rem;
+  font-family: inherit;
   outline: none;
   transition: border-color 0.2s;
   box-sizing: border-box;
@@ -206,87 +239,112 @@ const hasActiveFilters = computed(
   border-color: var(--color-accent);
 }
 
-.filter-group {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--spacing-md);
-  flex-wrap: wrap;
-}
-
-.filter-group label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  min-width: 60px;
-  padding-top: 5px;
-}
-
-.filter-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.filter-buttons button {
-  padding: 4px 12px;
-  border-radius: 4px;
+.clear-btn {
+  height: 42px;
+  padding: 0 14px;
+  background: transparent;
   border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-family: inherit;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.clear-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Filter row */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.attr-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.attr-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
   user-select: none;
 }
 
-.filter-buttons button:hover {
-  border-color: var(--color-accent);
+.attr-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.attr-btn:hover {
+  background: var(--color-tag-bg);
   color: var(--color-text);
 }
 
-/* Attribute active states */
-.attr-btn.attr-strength.active  { background: #c83c3c; border-color: #c83c3c; color: #fff; }
-.attr-btn.attr-agility.active   { background: #3ca050; border-color: #3ca050; color: #fff; }
-.attr-btn.attr-intelligence.active { background: #3c64c8; border-color: #3c64c8; color: #fff; }
-.attr-btn.attr-universal.active { background: #8c50c8; border-color: #8c50c8; color: #fff; }
+.attr-btn.attr-strength.active  { background: #c83c3c22; border-color: #c83c3c; color: #e05555; }
+.attr-btn.attr-agility.active   { background: #3ca05022; border-color: #3ca050; color: #4ebb65; }
+.attr-btn.attr-intelligence.active { background: #3c64c822; border-color: #3c64c8; color: #5a80e0; }
+.attr-btn.attr-universal.active { background: #8c50c822; border-color: #8c50c8; color: #a870e0; }
 
-/* Role active state */
+.filter-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.role-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.role-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.role-btn:hover {
+  background: var(--color-tag-bg);
+  color: var(--color-text);
+}
+
 .role-btn.active {
   background: var(--color-accent);
-  border-color: var(--color-accent);
   color: #000;
-}
-
-.filter-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  padding-top: 4px;
-  border-top: 1px solid var(--color-border);
-}
-
-.clear-btn {
-  padding: 4px 12px;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.clear-btn:hover {
-  border-color: var(--color-accent);
-  color: var(--color-text);
-}
-
-.active-summary {
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
+  font-weight: 500;
 }
 
 .results-count {

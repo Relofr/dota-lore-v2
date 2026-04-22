@@ -297,6 +297,17 @@ function fmt(n, decimals = 0) {
   object-fit: contain;
   display: block;
   pointer-events: auto;
+  animation-name: portrait-fade-in;
+  animation-duration: 1.3s;
+  animation-timing-function: ease-out;
+  animation-delay: 0s;
+  animation-iteration-count: 1;
+  animation-fill-mode: both;
+}
+
+@keyframes portrait-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .portrait-broodmother {

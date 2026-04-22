@@ -24,9 +24,9 @@ const ATTR_MAP = {
 
 // Module-level shared state — all components share the same fetch
 const heroes = ref([])
-const loading = ref(false)
+const loading = ref(true)
 const error = ref(null)
-let loaded = false
+let fetchStarted = false
 
 function cleanLore(raw) {
   if (!raw) return ''
@@ -97,7 +97,7 @@ function mapHero(apiHero, abilityLoreMap) {
 }
 
 async function loadHeroes() {
-  loading.value = true
+  fetchStarted = true
   try {
     const data = await fetchStratzHeroes()
 
@@ -120,7 +120,6 @@ async function loadHeroes() {
       .filter(h => h.displayName && h.shortName)
       .map(h => mapHero(h, abilityLoreMap))
       .sort((a, b) => a.name.localeCompare(b.name))
-    loaded = true
   } catch (err) {
     error.value = err.message
   } finally {
@@ -129,7 +128,7 @@ async function loadHeroes() {
 }
 
 export function useHeroes() {
-  if (!loaded && !loading.value) {
+  if (!fetchStarted) {
     loadHeroes()
   }
   return { heroes, loading, error }

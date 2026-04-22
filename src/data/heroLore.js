@@ -217,7 +217,7 @@ export const heroLore = {
     relatedHeroKeys: ['enchantress', 'treant'],
   },
   grimstroke: {
-    realName: null,
+    realName: 'Ascended One',
     factionId: null,
     affiliation: 'None (mass murderer)',
     shortLore: 'An ink mage who created a ritual painting that devoured the souls of his entire people — now bound to those souls forever.',
@@ -481,7 +481,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   phoenix: {
-    realName: null,
+    realName: 'Icarus',
     factionId: null,
     affiliation: 'None (last of its kind)',
     shortLore: 'The last light of a dying sun — a being of pure fire that is reborn each time it is killed, at the cost of terrible exhaustion.',
