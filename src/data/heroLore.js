@@ -1,7 +1,7 @@
 // Lore keyed by OpenDota hero key (npc_dota_hero_* with prefix stripped)
 export const heroLore = {
   abaddon: {
-    realName: 'Abaddon',
+    realName: 'Lord of Avernus',
     factionId: null,
     affiliation: 'House of Avernus',
     shortLore: 'Born from the Font of Avernus, a mist of death that has sustained his family for generations — now its sole surviving heir.',
@@ -41,7 +41,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   batrider: {
-    realName: 'Batrider',
+    realName: "Jin'zakk",
     factionId: 'the-oglodi',
     affiliation: 'The Oglodi',
     shortLore: 'An Oglodi warrior who tamed a fire-breathing bat, and now uses both the bat and a seemingly inexhaustible supply of flaming liquid to devastating effect.',
@@ -89,7 +89,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   chen: {
-    realName: 'Chen',
+    realName: null,
     factionId: null,
     affiliation: 'The Holy Host',
     shortLore: 'A former con artist who experienced a genuine divine conversion and now converts the animals of the battlefield to the Omniscience with evangelical fervor.',
@@ -97,7 +97,7 @@ export const heroLore = {
     relatedHeroKeys: ['omniknight'],
   },
   clinkz: {
-    realName: 'Clinkz',
+    realName: 'The Bone Fletcher',
     factionId: null,
     affiliation: 'None (cursed)',
     shortLore: 'An archer who burned alive after making a deal with a demon — his fire permanently internalized, his bones immortal, his hunger endless.',
@@ -137,7 +137,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   dazzle: {
-    realName: 'Dazzle',
+    realName: 'Shadow Priest',
     factionId: null,
     affiliation: 'The Dezun Order',
     shortLore: 'A shadow priest of the Dezun Order who used a forbidden technique to cheat death — and was exiled for it, taking the knowledge with him.',
@@ -193,7 +193,7 @@ export const heroLore = {
     relatedHeroKeys: ['furion'],
   },
   enigma: {
-    realName: 'Enigma',
+    realName: 'Darchrow',
     factionId: 'the-fundamentals',
     affiliation: 'The Fundamentals',
     shortLore: 'A Fundamental embodiment of gravity and dark matter — possibly a collapsed star, possibly something that was never a star at all.',
@@ -217,7 +217,7 @@ export const heroLore = {
     relatedHeroKeys: ['enchantress', 'treant'],
   },
   grimstroke: {
-    realName: 'Grimstroke',
+    realName: null,
     factionId: null,
     affiliation: 'None (mass murderer)',
     shortLore: 'An ink mage who created a ritual painting that devoured the souls of his entire people — now bound to those souls forever.',
@@ -233,7 +233,7 @@ export const heroLore = {
     relatedHeroKeys: ['rattletrap', 'tinker'],
   },
   hoodwink: {
-    realName: 'Hoodwink',
+    realName: null,
     factionId: null,
     affiliation: 'None (freebooter)',
     shortLore: "A quick-witted forest creature who turned the tools of her people's hunters against them — now wanted in three kingdoms for various offenses.",
@@ -241,15 +241,15 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   huskar: {
-    realName: 'Huskar',
+    realName: 'Sacred Warrior',
     factionId: null,
     affiliation: 'The Nothl Realm',
     shortLore: 'A sacred warrior who walked into the Nothl afterlife and came back wrong — still carrying the realm\'s power in his own burning blood.',
     lore: `Huskar walked into the Nothl Realm — the land of the dead in his people's belief — and came back. No one was supposed to come back. The Nothl Realm leaves marks: Huskar returned with his blood on fire, his body burning from inside in a way that does not kill him but grows more intense as he approaches death. The closer he comes to dying, the more power the burning gives him. He can hurl his own burning bones as weapons, and his connection to the Nothl gives him a resilience that conventional death cannot quite reach. He is not angry about any of this. He went to the Nothl deliberately, seeking the power it offered. He got it. The price is a permanent internal fire and an increasingly difficult relationship with his own mortality.`,
     relatedHeroKeys: [],
   },
-  io: {
-    realName: 'Io',
+  wisp: {
+    realName: 'Wisp',
     factionId: 'the-fundamentals',
     affiliation: 'The Fundamentals',
     shortLore: 'The Fundamental binding force — the connective thread between all things, present at every point of connection in the universe simultaneously.',
@@ -257,7 +257,7 @@ export const heroLore = {
     relatedHeroKeys: ['keeper_of_the_light', 'enigma', 'chaos_knight'],
   },
   jakiro: {
-    realName: 'Jakiro',
+    realName: 'Twin Head Dragon',
     factionId: null,
     affiliation: 'None',
     shortLore: 'A two-headed dragon — one head breathing ice, one breathing fire — whose heads are in constant disagreement about everything except the value of destruction.',
@@ -273,7 +273,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   kez: {
-    realName: 'Kez',
+    realName: 'Kestrel',
     factionId: null,
     affiliation: 'Independent',
     shortLore: 'A young dual-wielding swordsman whose training predates his understanding of why he was trained — now seeking the answers in battle.',
@@ -281,7 +281,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   kunkka: {
-    realName: 'Kunkka',
+    realName: null,
     factionId: null,
     affiliation: 'The Claddish Navy',
     shortLore: "The Admiral of the Claddish Navy — sole survivor of a fleet destroyed fighting Maelrawn the Tentacular, now haunted by the ghost of that battle.",
@@ -297,7 +297,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   leshrac: {
-    realName: 'Leshrac',
+    realName: 'Tormented Soul',
     factionId: null,
     affiliation: 'None (enlightened torment)',
     shortLore: 'A being of pain and enlightenment — having glimpsed the truth of existence, he is now tormented by knowing it and takes the world apart around him.',
@@ -321,7 +321,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   lion: {
-    realName: 'Lion',
+    realName: null,
     factionId: null,
     affiliation: 'None (cursed warlock)',
     shortLore: 'A warlock who bargained with a devil, got double-crossed, had his arm replaced with the devil\'s own, and has been taking revenge on demonkind ever since.',
@@ -353,7 +353,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   magnataur: {
-    realName: 'Magnus',
+    realName: 'Magnataur',
     factionId: null,
     affiliation: 'The Magnoceros Herd (destroyed)',
     shortLore: 'A magnataur warrior whose herd was slaughtered for their horns — now seeking the merchant responsible, armed with a tusk-sword that grows more powerful with each kill.',
@@ -361,7 +361,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   marci: {
-    realName: 'Marci',
+    realName: null,
     factionId: 'nightsilver-followers',
     affiliation: "Selemene's Followers",
     shortLore: "Mirana's silent companion and devoted protector — whose cheerful demeanor conceals an ability to tear people apart with her bare hands.",
@@ -369,7 +369,7 @@ export const heroLore = {
     relatedHeroKeys: ['mirana'],
   },
   mars: {
-    realName: 'Mars',
+    realName: null,
     factionId: 'olympian-pantheon',
     affiliation: 'The Olympian Pantheon',
     shortLore: "The god of war himself — who spent an age being sidelined in the pantheon, and has now descended to fight in person rather than from above.",
@@ -377,7 +377,7 @@ export const heroLore = {
     relatedHeroKeys: ['zuus'],
   },
   medusa: {
-    realName: 'Medusa',
+    realName: 'Gorgon',
     factionId: null,
     affiliation: 'None (cursed Gorgon)',
     shortLore: 'The most beautiful of the Gorgon sisters — whose beauty attracted divine attention, resulting in a curse that turned her hair to serpents and her gaze to stone.',
@@ -385,7 +385,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   meepo: {
-    realName: 'Meepo',
+    realName: 'Geomancer',
     factionId: null,
     affiliation: 'None (geomancer thief)',
     shortLore: 'A kobold thief who discovered he could split himself into multiple copies — and has been exploiting this ability with great enthusiasm ever since.',
@@ -393,7 +393,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   morphling: {
-    realName: 'Morphling',
+    realName: null,
     factionId: null,
     affiliation: 'The Elemental Waters',
     shortLore: 'An elemental of pure water — a being of complete fluidity who shifts form at will and can replicate the abilities of whatever it has recently studied.',
@@ -425,7 +425,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   nyx_assassin: {
-    realName: 'Nyx Assassin',
+    realName: "Anub'arak",
     factionId: null,
     affiliation: 'The Nyx Cult',
     shortLore: 'A scarab warrior chosen by the goddess Nyx — transformed beyond his original form to serve as her blade against the world\'s order.',
@@ -441,7 +441,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   ogre_magi: {
-    realName: 'Ogre Magi',
+    realName: 'Aggron Stonebreaker',
     factionId: null,
     affiliation: 'None (accident of magic)',
     shortLore: 'Two ogres — one barely sentient, one unexpectedly a magical genius — joined by a casting accident into one of the most powerful spellcasters alive.',
@@ -481,7 +481,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   phoenix: {
-    realName: 'Phoenix',
+    realName: null,
     factionId: null,
     affiliation: 'None (last of its kind)',
     shortLore: 'The last light of a dying sun — a being of pure fire that is reborn each time it is killed, at the cost of terrible exhaustion.',
@@ -489,7 +489,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   primal_beast: {
-    realName: 'Primal Beast',
+    realName: null,
     factionId: null,
     affiliation: 'None (primal force)',
     shortLore: 'Something that was buried beneath the world — ancient, massive, and entirely without interest in anything except the destruction of everything above it.',
@@ -497,7 +497,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   puck: {
-    realName: 'Puck',
+    realName: null,
     factionId: null,
     affiliation: 'The Faerie Dragons',
     shortLore: 'A faerie dragon who visits the mortal world the way some people visit museums — out of playful curiosity, with no intention of staying.',
@@ -505,7 +505,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   pudge: {
-    realName: 'Pudge',
+    realName: null,
     factionId: null,
     affiliation: 'None',
     shortLore: 'A butcher who has absorbed so much flesh from his victims that he is no longer recognizable as the creature he started as.',
@@ -513,7 +513,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   pugna: {
-    realName: 'Pugna',
+    realName: 'Oblivion',
     factionId: null,
     affiliation: 'None (being of annihilation)',
     shortLore: 'A being born directly from the Nether Reaches — whose entire nature is the erasure of magical energy, and who finds existence itself somewhat irritating.',
@@ -529,7 +529,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   razor: {
-    realName: 'Razor',
+    realName: null,
     factionId: null,
     affiliation: 'The Underscape',
     shortLore: 'The Lightning Revenant — an executioner of the realm of the dead whose method involves stripping the life force from enemies in crackling arcs.',
@@ -537,7 +537,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   riki: {
-    realName: 'Riki',
+    realName: null,
     factionId: null,
     affiliation: 'None (exiled noble)',
     shortLore: 'A noble\'s son whose family was murdered in a political conspiracy — permanently invisible, hunting each member of the conspiracy one by one.',
@@ -545,7 +545,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   rubick: {
-    realName: 'Rubick',
+    realName: 'The Grand Magus',
     factionId: null,
     affiliation: 'Independent',
     shortLore: 'Son of the legendary Aghanim — a Grand Magus whose gift is the ability to copy any spell he has observed, from any caster, without limit.',
@@ -571,7 +571,7 @@ export const heroLore = {
     relatedHeroKeys: ['lina', 'invoker'],
   },
   lina: {
-    realName: 'Lina',
+    realName: 'Slayer',
     factionId: null,
     affiliation: 'Independent',
     shortLore:
@@ -598,7 +598,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   terrorblade: {
-    realName: 'Terrorblade',
+    realName: 'Soul Keeper',
     factionId: null,
     affiliation: 'Exiled (formerly Demon Realm)',
     shortLore:
@@ -616,7 +616,7 @@ export const heroLore = {
     relatedHeroKeys: ['terrorblade'],
   },
   zuus: {
-    realName: 'Zeus',
+    realName: null,
     factionId: 'olympian-pantheon',
     affiliation: 'The Olympian Pantheon',
     shortLore:
@@ -625,7 +625,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   mirana: {
-    realName: 'Mirana',
+    realName: null,
     factionId: 'nightsilver-followers',
     affiliation: "Selemene's Followers",
     shortLore:
@@ -634,7 +634,7 @@ export const heroLore = {
     relatedHeroKeys: ['luna'],
   },
   luna: {
-    realName: 'Luna',
+    realName: null,
     factionId: 'dark-moon-order',
     affiliation: 'The Dark Moon Order',
     shortLore:
@@ -732,7 +732,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   shadow_demon: {
-    realName: 'Shadow Demon',
+    realName: null,
     factionId: null,
     affiliation: 'None (fragment of chaos)',
     shortLore: 'A fragment of a greater demonic entity that was imprisoned — still carrying that entity\'s intelligence and malice, now free and reconstituting.',
@@ -756,7 +756,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   slardar: {
-    realName: 'Slardar',
+    realName: null,
     factionId: null,
     affiliation: 'The Slithereen (deep guard)',
     shortLore: 'A deep-sea Slithereen guard who surfaced when the Ancient wars threatened the underwater kingdom — and finds air-breathing civilization baffling.',
@@ -764,7 +764,7 @@ export const heroLore = {
     relatedHeroKeys: ['naga_siren'],
   },
   slark: {
-    realName: 'Slark',
+    realName: null,
     factionId: null,
     affiliation: 'None (escaped)',
     shortLore: 'An escapee from Dark Reef — the underwater prison for beings too dangerous or too aquatic to hold on land — who has been free ever since.',
@@ -804,7 +804,7 @@ export const heroLore = {
     relatedHeroKeys: ['ember_spirit', 'earth_spirit', 'void_spirit'],
   },
   sven: {
-    realName: 'Sven',
+    realName: null,
     factionId: null,
     affiliation: 'None (bastard knight)',
     shortLore: "A half-god's bastard son raised by a disgraced knight — who freed himself from the prison his heritage put him in and made his own way in the world.",
@@ -852,7 +852,7 @@ export const heroLore = {
     relatedHeroKeys: ['rattletrap', 'sniper', 'gyrocopter'],
   },
   tiny: {
-    realName: 'Tiny',
+    realName: null,
     factionId: null,
     affiliation: 'The Stone Giants',
     shortLore: "A stone giant who grows larger when struck — what was once a small rock elemental is now an enormous geological force with a tree for a weapon.",
@@ -883,7 +883,7 @@ export const heroLore = {
     lore: `Ymir comes from the Icewrack, where the frozen northern communities developed a game over the centuries involving compacted snowballs, variable terrain, and an agreement that the last conscious player wins. Most participants treat it as recreation. Ymir treated it as the organizing principle of his existence. He perfected the art of the snowball — rolling it to incorporate anything in its path, launching it with enough force to knock over castle walls, timing its deployment to catch multiple opponents. He is considered the undefeated champion of every snowball tournament in the northern circuit. He came south when the tournaments ran out of challengers. He brings the same approach to the Ancient wars that he brought to every tournament: cheerful, escalating, and always with one more snowball.`,
     relatedHeroKeys: [],
   },
-  underlord: {
+  abyssal_underlord: {
     realName: 'Vrogros',
     factionId: null,
     affiliation: 'The Abyssal Horde',
@@ -916,7 +916,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   viper: {
-    realName: 'Viper',
+    realName: null,
     factionId: null,
     affiliation: 'The Nether Reaches',
     shortLore: "A Netherdrake who escaped from the Nether Reaches — a dimension of pure toxin — and now poisons everything he touches out of pure constitutional inclination.",
@@ -972,7 +972,7 @@ export const heroLore = {
     relatedHeroKeys: [],
   },
   witch_doctor: {
-    realName: 'Witch Doctor',
+    realName: null,
     factionId: null,
     affiliation: 'The Dezun Order (formerly)',
     shortLore: "A troll healer whose treatments are genuinely effective and genuinely terrifying in equal measure.",
@@ -1003,5 +1003,29 @@ export const heroLore = {
       'The Fundamental force of chaos itself, riding through the multiverse to spread disorder and test the nature of fate.',
     lore: `Zharvakko is the Fundamental embodiment of chaos — the opposing principle to order, randomness set against pattern, the great disruptor of calculated plans. He rides through the multiverse on a nightmare steed, appearing wherever certainty has grown too strong and needs to be broken. He is not evil in any conventional sense; chaos is simply what he is. He exists to ensure that the universe does not calcify into perfect predictability, that outcomes remain uncertain, that nothing is ever entirely guaranteed. Ezalor, the Keeper of Light, is his ancient counterpart — order to his chaos, knowledge to his uncertainty. Their relationship is older than the current age and will outlast it. Zharvakko finds this endlessly amusing.`,
     relatedHeroKeys: ['keeper_of_the_light'],
+  },
+  monkey_king: {
+    realName: 'Sun Wukong',
+    factionId: null,
+    affiliation: 'The Heavenly Kingdom (exiled)',
+    shortLore: 'The Great Sage Equal to Heaven — a trickster demigod imprisoned under a mountain for five centuries, now free and bringing chaos wherever he goes.',
+    lore: `Sun Wukong was a simian warrior of extraordinary power who rose from obscurity to challenge the gods of heaven themselves. He stormed the celestial court, defeated its armies, and declared himself the Great Sage Equal to Heaven — a title the gods found offensive and accurate in equal measure. He was eventually subdued not by strength but by trickery, trapped under a mountain by divine decree for five hundred years as punishment. When he was finally released, the sentence had done nothing to humble him. He carries an enchanted staff that can extend to any size, can transform himself into countless forms and creatures, and moves through the world with the cheerful aggression of someone who has beaten heaven once and considers it a personal best to be surpassed.`,
+    relatedHeroKeys: [],
+  },
+  snapfire: {
+    realName: 'Beatrix Snapfire',
+    factionId: null,
+    affiliation: 'Independent',
+    shortLore: 'A grandmother with a dragon-toad mount, a family cookie recipe with unusual side effects, and a shotgun she is not shy about using.',
+    lore: `Beatrix Snapfire is a grandmother in the way that volcanoes are landscapes: technically accurate but missing something important about scale and danger. She rides Mortimer, a dragon-toad of enormous size and indiscriminate appetite, with the casual authority of someone who raised him from an egg and is not impressed by his teeth. She carries a shotgun that fires everything from buckshot to her family's famous cookies — a recipe whose secret ingredient produces effects that Beatrix describes as "medicinal" and her enemies describe as catastrophic. She has been wandering the world since her grandchildren grew up, applying her expertise in toad-riding, baking, and targeted violence to whatever situations present themselves. She is having a wonderful time.`,
+    relatedHeroKeys: [],
+  },
+  ringmaster: {
+    realName: null,
+    factionId: null,
+    affiliation: 'The Astral Circus',
+    shortLore: 'The enigmatic ringmaster of a travelling circus that exists between worlds — whose performances are as dangerous as they are spectacular.',
+    lore: `The Ringmaster presides over the Astral Circus, a travelling entertainment that appears without announcement and departs before anyone can fully account for what they witnessed. He commands his performers with an iron showmanship, directing acts of impossible skill and genuine danger with the authority of a man who has never lost control of a performance and does not intend to start. His top hat conceals more than it should, his cane is more weapon than prop, and the performers who travel with him are bound to the circus by contracts that the Ringmaster describes as "mutually beneficial" and that the performers rarely argue with. He has been running the circus for longer than anyone can document. The show, he insists, must go on.`,
+    relatedHeroKeys: [],
   },
 }

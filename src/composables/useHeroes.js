@@ -41,6 +41,22 @@ function cleanLore(raw) {
     .trim()
 }
 
+function formatAlias(a) {
+  return a
+    .replace(/_/g, ' ')
+    .replace(/[^\w\s']/g, '')
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .trim()
+}
+
+function pickAlias(aliases) {
+  if (!aliases?.length) return null
+  const candidates = aliases.filter(a => a.length > 2 || (/[a-z]/.test(a) && /[A-Z]/.test(a)))
+  if (!candidates.length) return null
+  const longest = candidates.reduce((a, b) => b.length > a.length ? b : a)
+  return formatAlias(longest)
+}
+
 function mapHero(apiHero, abilityLoreMap) {
   const key = apiHero.shortName || apiHero.name.replace('npc_dota_hero_', '')
   const loreData = heroLore[key] || {}
@@ -57,7 +73,7 @@ function mapHero(apiHero, abilityLoreMap) {
   return {
     id: key,
     name: apiHero.displayName,
-    realName: loreData.realName || apiHero.displayName,
+    realName: loreData.realName || pickAlias(apiHero.aliases) || apiHero.displayName,
     primaryAttribute: ATTR_MAP[apiHero.stats?.primaryAttribute] || 'universal',
     roles,
     attackType: apiHero.stats?.attackType || null,
