@@ -20,29 +20,46 @@ const attrLabel = {
 
 const entities = computed(() => {
   const list = []
+
   for (const hero of heroes.value) {
     if (hero.id === props.heroId) continue
     list.push({
+      type: 'hero',
       name: hero.name,
       displayName: hero.name,
       route: `/heroes/${hero.id}`,
       entityId: hero.id,
-      // attr: hero.primaryAttribute,
       iconUrl: hero.iconUrl,
-      // reason: "Mentioned in this hero's lore",
     })
     if (hero.realName && hero.realName !== hero.name) {
       list.push({
+        type: 'hero',
         name: hero.realName,
         displayName: hero.name,
         route: `/heroes/${hero.id}`,
         entityId: hero.id,
-        // attr: hero.primaryAttribute,
         iconUrl: hero.iconUrl,
-        // reason: "Mentioned in this hero's lore",
       })
     }
   }
+
+  const seenFactions = new Map()
+  for (const hero of heroes.value) {
+    if (hero.factionId && hero.affiliation && !seenFactions.has(hero.factionId)) {
+      seenFactions.set(hero.factionId, hero.affiliation)
+    }
+  }
+  for (const [factionId, affiliation] of seenFactions) {
+    list.push({
+      type: 'faction',
+      name: affiliation,
+      displayName: affiliation,
+      route: `/heroes?faction=${factionId}`,
+      entityId: factionId,
+      iconUrl: null,
+    })
+  }
+
   return list.sort((a, b) => b.name.length - a.name.length)
 })
 
@@ -90,7 +107,10 @@ const paragraphs = computed(() =>
           @mouseenter="activeKey = `${pi}-${si}`"
           @mouseleave="activeKey = null"
         >
-          <RouterLink :to="seg.route" class="lore-link">{{ seg.content }}</RouterLink>
+          <RouterLink
+            :to="seg.route"
+            :class="['lore-link', seg.entity.type === 'faction' ? 'lore-link-faction' : '']"
+          >{{ seg.content }}</RouterLink>
           <span v-if="activeKey === `${pi}-${si}`" class="entity-tooltip">
             <span class="tooltip-header">
               <img
@@ -101,8 +121,7 @@ const paragraphs = computed(() =>
               />
               <span class="tooltip-name">{{ seg.entity.displayName }}</span>
             </span>
-            <span class="tooltip-reason">{{ seg.entity.reason }}</span>
-            <span v-if="seg.entity.attr" class="tooltip-attr">{{ attrLabel[seg.entity.attr] }}</span>
+            <span v-if="seg.entity.type === 'faction'" class="tooltip-type">Faction</span>
           </span>
         </span>
         <template v-else>{{ seg.content }}</template>
@@ -138,6 +157,15 @@ const paragraphs = computed(() =>
 
 .lore-link:hover {
   border-bottom-color: var(--color-accent);
+}
+
+.lore-link-faction {
+  color: #7ec8c8;
+  border-bottom-color: color-mix(in srgb, #7ec8c8 40%, transparent);
+}
+
+.lore-link-faction:hover {
+  border-bottom-color: #7ec8c8;
 }
 
 .entity-tooltip {
@@ -182,6 +210,13 @@ const paragraphs = computed(() =>
   font-size: 0.75rem;
   color: var(--color-accent);
   font-style: italic;
+}
+
+.tooltip-type {
+  font-size: 0.72rem;
+  color: #7ec8c8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .tooltip-attr {

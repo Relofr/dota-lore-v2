@@ -25,16 +25,30 @@ const { heroes, loading, error } = useHeroes()
 const searchQuery = ref(route.query.q || '')
 const selectedAttributes = ref(route.query.attr ? [].concat(route.query.attr) : [])
 const selectedRoles = ref(route.query.role ? [].concat(route.query.role) : [])
+const selectedFactions = ref(route.query.faction ? [].concat(route.query.faction) : [])
 
-watch([searchQuery, selectedAttributes, selectedRoles], () => {
+watch([searchQuery, selectedAttributes, selectedRoles, selectedFactions], () => {
   router.replace({
     query: {
       ...(searchQuery.value ? { q: searchQuery.value } : {}),
       ...(selectedAttributes.value.length ? { attr: selectedAttributes.value } : {}),
       ...(selectedRoles.value.length ? { role: selectedRoles.value } : {}),
+      ...(selectedFactions.value.length ? { faction: selectedFactions.value } : {}),
     }
   })
 }, { deep: true })
+
+const allFactions = computed(() => {
+  const seen = new Map()
+  for (const hero of heroes.value) {
+    if (hero.factionId && !seen.has(hero.factionId)) {
+      seen.set(hero.factionId, hero.affiliation)
+    }
+  }
+  return [...seen.entries()]
+    .map(([id, label]) => ({ id, label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
 
 const filteredHeroes = computed(() => {
   return heroes.value.filter((hero) => {
@@ -56,7 +70,11 @@ const filteredHeroes = computed(() => {
       selectedRoles.value.length === 0 ||
       selectedRoles.value.every((role) => hero.roles.includes(role))
 
-    return matchesSearch && matchesAttribute && matchesRole
+    const matchesFaction =
+      selectedFactions.value.length === 0 ||
+      selectedFactions.value.includes(hero.factionId)
+
+    return matchesSearch && matchesAttribute && matchesRole && matchesFaction
   })
 })
 
@@ -72,14 +90,21 @@ function toggleRole(role) {
   else selectedRoles.value.push(role)
 }
 
+function toggleFaction(id) {
+  const idx = selectedFactions.value.indexOf(id)
+  if (idx >= 0) selectedFactions.value.splice(idx, 1)
+  else selectedFactions.value.push(id)
+}
+
 function clearFilters() {
   searchQuery.value = ''
   selectedAttributes.value = []
   selectedRoles.value = []
+  selectedFactions.value = []
 }
 
 const hasActiveFilters = computed(
-  () => searchQuery.value || selectedAttributes.value.length || selectedRoles.value.length,
+  () => searchQuery.value || selectedAttributes.value.length || selectedRoles.value.length || selectedFactions.value.length,
 )
 </script>
 
@@ -140,6 +165,17 @@ const hasActiveFilters = computed(
             {{ role }}
           </button>
         </div>
+      </div>
+
+      <div v-if="allFactions.length" class="filter-row faction-row">
+        <button
+          v-for="faction in allFactions"
+          :key="faction.id"
+          :class="['faction-btn', { active: selectedFactions.includes(faction.id) }]"
+          @click="toggleFaction(faction.id)"
+        >
+          {{ faction.label }}
+        </button>
       </div>
     </div>
 
@@ -344,6 +380,35 @@ const hasActiveFilters = computed(
 .role-btn.active {
   background: var(--color-accent);
   color: #000;
+  font-weight: 500;
+}
+
+.faction-row {
+  flex-wrap: wrap;
+}
+
+.faction-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.faction-btn:hover {
+  background: var(--color-tag-bg);
+  color: var(--color-text);
+}
+
+.faction-btn.active {
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-card-bg));
+  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  color: var(--color-accent);
   font-weight: 500;
 }
 

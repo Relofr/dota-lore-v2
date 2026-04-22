@@ -369,7 +369,7 @@ export const heroLore = {
     relatedHeroKeys: ['mirana'],
   },
   mars: {
-    realName: null,
+    realName: 'first son of heaven',
     factionId: 'olympian-pantheon',
     affiliation: 'The Olympian Pantheon',
     shortLore: "The god of war himself — who spent an age being sidelined in the pantheon, and has now descended to fight in person rather than from above.",
@@ -996,7 +996,7 @@ export const heroLore = {
     relatedHeroKeys: ['ember_spirit', 'storm_spirit', 'void_spirit'],
   },
   chaos_knight: {
-    realName: 'Zharvakko',
+    realName: 'Nessaj',
     factionId: 'the-fundamentals',
     affiliation: 'The Fundamentals',
     shortLore:

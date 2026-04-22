@@ -51,7 +51,6 @@ const relatedHeroes = computed(() => {
     const otherNames = [other.name]
     if (other.realName && other.realName !== other.name) otherNames.push(other.realName)
 
-    // Forward: this hero's lore mentions the other hero
     const forwardMatch = otherNames.find(n =>
       new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`, 'i').test(loreText)
     )
@@ -60,7 +59,6 @@ const relatedHeroes = computed(() => {
       continue
     }
 
-    // Reverse: the other hero's lore mentions this hero
     const otherLore = other.lore || ''
     const reverseMatch = currentNames.find(n =>
       new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`, 'i').test(otherLore)
@@ -71,6 +69,14 @@ const relatedHeroes = computed(() => {
   }
 
   return results
+})
+
+const factionHeroes = computed(() => {
+  if (!hero.value?.factionId) return []
+  const loreIds = new Set(relatedHeroes.value.map(r => r.hero.id))
+  return heroes.value.filter(
+    h => h.id !== hero.value.id && h.factionId === hero.value.factionId && !loreIds.has(h.id)
+  )
 })
 
 const attributeColors = {
@@ -127,6 +133,11 @@ function fmt(n, decimals = 0) {
           }}</span>
           <span v-if="hero.attackType" class="attack-badge">{{ hero.attackType }}</span>
           <span v-for="role in hero.roles" :key="role" class="role-tag">{{ role }}</span>
+          <RouterLink
+            v-if="hero.factionId"
+            :to="`/heroes?faction=${hero.factionId}`"
+            class="affiliation-badge"
+          >{{ hero.affiliation }}</RouterLink>
         </div>
       </div>
     </div>
@@ -143,19 +154,38 @@ function fmt(n, decimals = 0) {
           <p class="lore-placeholder">Extended lore for {{ hero.name }} coming soon.</p>
         </div>
 
-        <div v-if="relatedHeroes.length" class="related-section">
+        <div v-if="relatedHeroes.length || factionHeroes.length" class="related-section">
           <h2>Related Heroes</h2>
-          <div class="related-chips">
-            <RouterLink
-              v-for="rel in relatedHeroes"
-              :key="rel.hero.id"
-              :to="`/heroes/${rel.hero.id}`"
-              class="related-chip"
-            >
-              <img :src="rel.hero.iconUrl" :alt="rel.hero.name" class="related-chip-icon" />
-              <span class="related-chip-name">{{ rel.hero.name }}</span>
-            </RouterLink>
-          </div>
+
+          <template v-if="relatedHeroes.length">
+            <p class="related-label">Mentioned in lore</p>
+            <div class="related-chips">
+              <RouterLink
+                v-for="rel in relatedHeroes"
+                :key="rel.hero.id"
+                :to="`/heroes/${rel.hero.id}`"
+                class="related-chip"
+              >
+                <img :src="rel.hero.iconUrl" :alt="rel.hero.name" class="related-chip-icon" />
+                <span class="related-chip-name">{{ rel.hero.name }}</span>
+              </RouterLink>
+            </div>
+          </template>
+
+          <template v-if="factionHeroes.length">
+            <p class="related-label">{{ hero.affiliation }}</p>
+            <div class="related-chips">
+              <RouterLink
+                v-for="fh in factionHeroes"
+                :key="fh.id"
+                :to="`/heroes/${fh.id}`"
+                class="related-chip"
+              >
+                <img :src="fh.iconUrl" :alt="fh.name" class="related-chip-icon" />
+                <span class="related-chip-name">{{ fh.name }}</span>
+              </RouterLink>
+            </div>
+          </template>
         </div>
 
         <div v-if="hero.abilities && hero.abilities.length" class="abilities-section">
@@ -404,6 +434,22 @@ function fmt(n, decimals = 0) {
   height: 14px;
 }
 
+.affiliation-badge {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-card-bg));
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+a.affiliation-badge:hover {
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-card-bg));
+  border-color: color-mix(in srgb, var(--color-accent) 60%, transparent);
+}
+
 .complexity-badge {
   padding: 3px 8px;
   border-radius: 999px;
@@ -494,6 +540,18 @@ function fmt(n, decimals = 0) {
   color: var(--color-text-muted);
   font-style: italic;
   margin: 0;
+}
+
+.related-label {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin: 0 0 8px;
+}
+
+.related-label + .related-chips {
+  margin-bottom: var(--spacing-md);
 }
 
 .related-chips {

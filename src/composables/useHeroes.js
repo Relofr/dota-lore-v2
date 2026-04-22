@@ -49,17 +49,28 @@ function formatAlias(a) {
     .trim()
 }
 
-function pickAlias(aliases) {
+function pickAlias(aliases, displayName) {
   if (!aliases?.length) return null
-  const candidates = aliases.filter(a => a.length > 2 || (/[a-z]/.test(a) && /[A-Z]/.test(a)))
+  const excluded = displayName?.toLowerCase()
+  const candidates = aliases.filter(a => {
+    if (excluded && a.toLowerCase() === excluded) return false
+    return a.length > 2 || (/[a-z]/.test(a) && /[A-Z]/.test(a))
+  })
   if (!candidates.length) return null
   const longest = candidates.reduce((a, b) => b.length > a.length ? b : a)
   return formatAlias(longest)
 }
 
+function isSubstantial(str, minLen = 30) {
+  return typeof str === 'string' && str.length >= minLen
+}
+
 function mapHero(apiHero, abilityLoreMap) {
   const key = apiHero.shortName || apiHero.name.replace('npc_dota_hero_', '')
   const loreData = heroLore[key] || {}
+  if (!heroLore[key]) {
+    console.warn(`[heroLore] no entry for key="${key}" (displayName="${apiHero.displayName}", name="${apiHero.name}", shortName="${apiHero.shortName}")`)
+  }
   const roles = (apiHero.roles || [])
     .sort((a, b) => b.level - a.level)
     .map(r => ROLE_MAP[r.roleId])
@@ -70,10 +81,14 @@ function mapHero(apiHero, abilityLoreMap) {
     .map(({ abilityId }) => abilityLoreMap.get(abilityId))
     .filter(a => a && a.lore)
 
+  const apiLore = cleanLore(apiHero.language?.lore)
+  const apiHype = cleanLore(apiHero.language?.hype)
+  const apiAlias = pickAlias(apiHero.aliases, apiHero.displayName)
+
   return {
     id: key,
     name: apiHero.displayName,
-    realName: loreData.realName || pickAlias(apiHero.aliases) || apiHero.displayName,
+    realName: apiAlias || (loreData.realName ? formatAlias(loreData.realName) : null) || apiHero.displayName,
     primaryAttribute: ATTR_MAP[apiHero.stats?.primaryAttribute] || 'universal',
     roles,
     attackType: apiHero.stats?.attackType || null,
@@ -88,8 +103,10 @@ function mapHero(apiHero, abilityLoreMap) {
       hpRegen: apiHero.stats?.hpRegen ?? 0,
       moveSpeed: apiHero.stats?.moveSpeed ?? 0,
     },
-    lore: cleanLore(apiHero.language?.lore),
-    shortLore: cleanLore(apiHero.language?.hype),
+    affiliation: loreData.affiliation || null,
+    factionId: loreData.factionId || null,
+    lore: isSubstantial(apiLore) ? apiLore : (loreData.lore || apiLore || ''),
+    shortLore: isSubstantial(apiHype, 20) ? apiHype : (loreData.shortLore || apiHype || ''),
     abilities,
     imageUrl: `${IMG_BASE}/${key}.png`,
     iconUrl: `${IMG_BASE}/icons/${key}.png`,
