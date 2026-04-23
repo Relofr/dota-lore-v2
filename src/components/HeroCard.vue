@@ -16,10 +16,17 @@ const props = defineProps({
 const imgError = ref(false)
 
 const attributeIcons = {
-  strength: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png',
-  agility: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png',
+  strength:     'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png',
+  agility:      'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png',
   intelligence: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_intelligence.png',
-  universal: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png',
+  universal:    'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png',
+}
+
+const attributeColors = {
+  strength:     '#c83c3c',
+  agility:      '#3ca050',
+  intelligence: '#3c64c8',
+  universal:    '#8c50c8',
 }
 </script>
 
@@ -46,11 +53,19 @@ const attributeIcons = {
     <div class="hero-info">
       <h3 class="hero-name">
         {{ hero.name }}
-        <img
-          class="attribute-icon"
-          :src="attributeIcons[hero.primaryAttribute]"
-          :alt="hero.primaryAttribute"
-        />
+        <RouterLink
+          :to="`/heroes?attr=${hero.primaryAttribute}`"
+          class="attr-icon-wrap"
+          :data-label="hero.primaryAttribute.charAt(0).toUpperCase() + hero.primaryAttribute.slice(1)"
+          :style="{ '--attr-color': attributeColors[hero.primaryAttribute] }"
+          @click.stop
+        >
+          <img
+            class="attribute-icon"
+            :src="attributeIcons[hero.primaryAttribute]"
+            :alt="hero.primaryAttribute"
+          />
+        </RouterLink>
       </h3>
       <p class="hero-real-name">{{ hero.realName !== hero.name ? hero.realName : ' ' }}</p>
       <div class="hero-roles">
@@ -72,7 +87,6 @@ const attributeIcons = {
   background: var(--color-card-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  overflow: hidden;
   transition: border-color 0.2s, transform 0.2s;
 }
 
@@ -87,6 +101,7 @@ const attributeIcons = {
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--color-border);
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .hero-image {
@@ -120,11 +135,48 @@ const attributeIcons = {
   display: flex;
   align-items: center;
   gap: 5px;
+  justify-content: space-between;
+}
+
+.attr-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.attr-icon-wrap::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #252b36;
+  border: 1px solid #2e3542;
+  color: var(--color-text);
+  font-size: 0.7rem;
+  font-family: "Reaver Regular";
+  font-weight: 400;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 10;
+}
+
+.attr-icon-wrap:hover::after {
+  opacity: 1;
+}
+
+.attr-icon-wrap:hover {
+  background: color-mix(in srgb, var(--attr-color) 16%, var(--color-tag-bg));
+  border-radius: 3px;
 }
 
 .attribute-icon {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
 }
 
@@ -138,9 +190,11 @@ const attributeIcons = {
 .hero-roles {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   margin-bottom: 8px;
 }
+
 
 .role-tag {
   font-size: 0.68rem;

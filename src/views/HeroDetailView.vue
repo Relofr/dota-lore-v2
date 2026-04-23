@@ -86,6 +86,13 @@ const attributeColors = {
   universal: "#8c50c8",
 };
 
+const attributeIcons = {
+  strength:     'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png',
+  agility:      'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png',
+  intelligence: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_intelligence.png',
+  universal:    'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png',
+};
+
 function fmt(n, decimals = 0) {
   return typeof n === 'number' ? +n.toFixed(decimals) : n
 }
@@ -120,24 +127,34 @@ function fmt(n, decimals = 0) {
           <em>{{ hero.realName }}</em>
         </p>
         <div class="meta-row">
-          <span
+          <RouterLink
+            :to="`/heroes?attr=${hero.primaryAttribute}`"
             class="attribute-badge"
             :style="{
+              '--attr-color': attributeColors[hero.primaryAttribute],
               background: attributeColors[hero.primaryAttribute] + '22',
               color: attributeColors[hero.primaryAttribute],
               borderColor: attributeColors[hero.primaryAttribute] + '55',
             }"
-          >{{
-            hero.primaryAttribute.charAt(0).toUpperCase() +
-            hero.primaryAttribute.slice(1)
-          }}</span>
-          <span v-if="hero.attackType" class="attack-badge">{{ hero.attackType }}</span>
-          <span v-for="role in hero.roles" :key="role" class="role-tag">{{ role }}</span>
+          >
+            <img
+              class="attribute-badge-icon"
+              :src="attributeIcons[hero.primaryAttribute]"
+              :alt="hero.primaryAttribute"
+            />
+            {{
+              hero.primaryAttribute.charAt(0).toUpperCase() +
+              hero.primaryAttribute.slice(1)
+            }}
+          </RouterLink>
           <RouterLink
             v-if="hero.factionId"
             :to="`/heroes?faction=${hero.factionId}`"
             class="affiliation-badge"
           >{{ hero.affiliation }}</RouterLink>
+          <span class="meta-divider" />
+          <span v-if="hero.attackType" class="attack-badge">{{ hero.attackType }}</span>
+          <span v-for="role in hero.roles" :key="role" class="role-tag">{{ role }}</span>
         </div>
       </div>
     </div>
@@ -393,8 +410,16 @@ function fmt(n, decimals = 0) {
 .meta-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: var(--spacing-sm);
+}
+
+.meta-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-border);
+  flex-shrink: 0;
 }
 
 .attribute-badge {
@@ -404,7 +429,22 @@ function fmt(n, decimals = 0) {
   padding: 3px 10px;
   border-radius: 4px;
   border: 1px solid;
+  display: inline-flex;
+  text-decoration: none;
+  align-items: center;
+  gap: 5px;
   border-radius: 999px;
+}
+
+.attribute-badge:hover {
+  background: color-mix(in srgb, var(--attr-color) 16%, var(--color-card-bg)) !important;
+  border-color: color-mix(in srgb, var(--attr-color) 60%, transparent) !important;
+}
+
+.attribute-badge-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .role-tag {
