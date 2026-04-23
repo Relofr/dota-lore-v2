@@ -136,7 +136,6 @@ const hasActiveFilters = computed(
             :disabled="loading"
           />
         </div>
-        <button v-if="hasActiveFilters" class="clear-btn" @click="clearFilters">Clear</button>
       </div>
 
       <div class="filter-row">
@@ -165,6 +164,7 @@ const hasActiveFilters = computed(
             {{ role }}
           </button>
         </div>
+
       </div>
 
       <div v-if="allFactions.length" class="filter-row faction-row">
@@ -176,6 +176,10 @@ const hasActiveFilters = computed(
         >
           {{ faction.label }}
         </button>
+      </div>
+
+      <div v-if="hasActiveFilters" class="clear-row">
+        <button class="clear-all-btn" @click="clearFilters">Clear all filters</button>
       </div>
     </div>
 
@@ -290,6 +294,26 @@ const hasActiveFilters = computed(
   flex-shrink: 0;
 }
 
+.clear-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.clear-all-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.clear-all-btn:hover {
+  color: var(--color-accent);
+}
+
 .clear-btn:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
@@ -319,8 +343,8 @@ const hasActiveFilters = computed(
   gap: 5px;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--color-border);
+  background: var(--color-tag-bg);
   color: var(--color-text-muted);
   font-size: 0.78rem;
   font-family: inherit;
@@ -362,8 +386,8 @@ const hasActiveFilters = computed(
 .role-btn {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--color-border);
+  background: var(--color-tag-bg);
   color: var(--color-text-muted);
   font-size: 0.85rem;
   font-family: inherit;
@@ -390,8 +414,8 @@ const hasActiveFilters = computed(
 .faction-btn {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--color-border);
+  background: var(--color-tag-bg);
   color: var(--color-text-muted);
   font-size: 0.8rem;
   font-family: inherit;

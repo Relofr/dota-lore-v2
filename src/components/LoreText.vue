@@ -173,8 +173,8 @@ const paragraphs = computed(() =>
   bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  background: var(--color-card-bg);
-  border: 1px solid var(--color-border);
+  background: #252b36;
+  border: 1px solid #2e3542;
   border-radius: var(--radius);
   padding: 8px 12px;
   min-width: 120px;
@@ -221,7 +221,7 @@ const paragraphs = computed(() =>
 
 .tooltip-attr {
   font-size: 0.72rem;
-  color: var(--color-text-muted);
+  color: #9aa3b2;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }

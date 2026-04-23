@@ -22,7 +22,7 @@ import AppFooter from "@/components/AppFooter.vue";
   --color-card-bg: #13161b;
   --color-border: #1e2229;
   --color-text: #e8eaed;
-  --color-text-muted: #7a8494;
+  --color-text-muted: #8891a0;
   --color-accent: #ff6046;
   --color-tag-bg: #1a1e25;
   --accent-rgb: 200, 151, 42;
