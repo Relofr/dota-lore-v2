@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter, RouterLink } from "vue-router";
 import { useHeroes } from "@/composables/useHeroes.js";
+import { useSpeech } from "@/composables/useSpeech.js";
 import LoreText from "@/components/LoreText.vue";
 
 import meleeIcon   from "@/assets/images/melee.svg";
@@ -15,7 +16,60 @@ const router = useRouter();
 const { heroes, loading } = useHeroes();
 
 const videoReady = ref(false)
-watch(() => route.params.id, () => { videoReady.value = false })
+const { speaking, paused, loading: ttsLoading, supported, toggle: toggleSpeech, stop: stopSpeech } = useSpeech()
+watch(() => route.params.id, () => { videoReady.value = false; stopSpeech() })
+
+const searchOpen  = ref(false)
+const searchQuery = ref('')
+const searchInput = ref(null)
+
+const searchResults = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim()
+  if (!q) return []
+  return heroes.value
+    .filter(h => h.id !== route.params.id && (
+      h.name.toLowerCase().includes(q) ||
+      (h.realName && h.realName.toLowerCase().includes(q))
+    ))
+    .slice(0, 6)
+})
+
+function openSearch() {
+  searchOpen.value = true
+  searchQuery.value = ''
+  setTimeout(() => searchInput.value?.focus(), 50)
+}
+
+function closeSearch() {
+  searchOpen.value = false
+  searchQuery.value = ''
+}
+
+function goToResult(hero) {
+  router.push(`/heroes/${hero.id}`)
+  closeSearch()
+}
+
+function onSearchKeydown(e) {
+  if (e.key === 'Enter' && searchResults.value.length) {
+    goToResult(searchResults.value[0])
+  } else if (e.key === 'Escape') {
+    closeSearch()
+  }
+}
+
+function onGlobalKeydown(e) {
+  if (searchOpen.value || e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return
+  if (e.key.length === 1) {
+    e.preventDefault()
+    searchQuery.value = e.key
+    searchOpen.value = true
+    setTimeout(() => searchInput.value?.focus(), 50)
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 
 function goToRandom() {
   const others = heroes.value.filter(h => h.id !== route.params.id)
@@ -194,7 +248,24 @@ function fmt(n, decimals = 0) {
     <div class="hero-layout">
       <div class="hero-content">
         <div v-if="hero.lore" class="lore-section">
-          <h2>Lore</h2>
+          <div class="lore-heading">
+            <h2>Lore</h2>
+            <button
+              v-if="false"
+              class="lore-listen-btn"
+              :class="{ loading: ttsLoading }"
+              :disabled="ttsLoading"
+              :title="ttsLoading ? 'Loading…' : speaking && !paused ? 'Pause' : paused ? 'Resume' : 'Listen'"
+              @click="toggleSpeech(hero.lore)"
+            >
+              <!-- Loading spinner -->
+              <svg v-if="ttsLoading" class="spin" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 31.5-155.5t86-127Q252-817 325-848.5T480-880q17 0 28.5 11.5T520-840q0 17-11.5 28.5T480-800q-133 0-226.5 93.5T160-480q0 133 93.5 226.5T480-160q133 0 226.5-93.5T800-480q0-17 11.5-28.5T840-520q17 0 28.5 11.5T880-480q0 82-31.5 155t-86 127.5Q708-143 635-111.5T480-80Z"/></svg>
+              <!-- Pause -->
+              <svg v-else-if="speaking && !paused && !ttsLoading" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M520-200v-560h240v560H520Zm-320 0v-560h240v560H200Z"/></svg>
+              <!-- Play -->
+              <svg v-else xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg>
+            </button>
+          </div>
           <LoreText :lore="hero.lore" :hero-id="hero.id" />
         </div>
         <div v-else class="lore-section lore-empty">
@@ -282,6 +353,33 @@ function fmt(n, decimals = 0) {
         </video>
       </div>
     </div>
+
+    <!-- Floating hero search -->
+    <Transition name="search-fade">
+      <div v-if="searchOpen" class="hero-search-overlay" @click.self="closeSearch">
+        <div class="hero-search-box">
+          <input
+            ref="searchInput"
+            v-model="searchQuery"
+            class="hero-search-input"
+            placeholder="Search heroes…"
+            @keydown="onSearchKeydown"
+          />
+          <div v-if="searchResults.length" class="hero-search-results">
+            <button
+              v-for="h in searchResults"
+              :key="h.id"
+              class="hero-search-result"
+              @click="goToResult(h)"
+            >
+              <img :src="h.iconUrl" :alt="h.name" class="hero-search-icon" />
+              <span class="hero-search-name">{{ h.name }}</span>
+              <span v-if="h.realName !== h.name" class="hero-search-real">{{ h.realName }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -414,7 +512,7 @@ video.hero-portrait-img {
 }
 
 .portrait-broodmother {
-  justify-content: flex-end;
+  justify-items: end;
 }
 
 .portrait-broodmother .hero-portrait-img {
@@ -570,6 +668,47 @@ a.affiliation-badge:hover {
   margin-bottom: calc(var(--spacing-lg) * 1.5);
 }
 
+.lore-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--spacing-sm);
+}
+
+.lore-heading h2 {
+  margin: 0;
+}
+
+.lore-listen-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.lore-listen-btn:hover {
+  color: var(--color-accent);
+}
+
+.lore-listen-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .lore-section h2,
 .related-section h2,
 .abilities-section h2 {
@@ -581,6 +720,12 @@ a.affiliation-badge:hover {
   letter-spacing: 0.08em;
   border-bottom: 1px solid var(--color-border);
   padding-bottom: var(--spacing-sm);
+}
+
+.lore-section .lore-heading h2 {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin: 0;
 }
 
 .ability-list {
@@ -780,5 +925,91 @@ a.affiliation-badge:hover {
 .hero-nav-arrow {
   flex-shrink: 0;
   display: block;
+}
+
+/* Floating hero search */
+.hero-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 20vh;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.hero-search-box {
+  width: 100%;
+  max-width: 480px;
+  background: #252b36;
+  border: 1px solid #2e3542;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
+}
+
+.hero-search-input {
+  width: 100%;
+  height: 52px;
+  padding: 0 var(--spacing-lg);
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.hero-search-results {
+  border-top: 1px solid #2e3542;
+  display: flex;
+  flex-direction: column;
+}
+
+.hero-search-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--spacing-lg);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+  width: 100%;
+}
+
+.hero-search-result:hover {
+  background: color-mix(in srgb, var(--color-accent) 8%, #252b36);
+}
+
+.hero-search-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.hero-search-name {
+  color: var(--color-text);
+  font-size: 0.9rem;
+  flex: 1;
+}
+
+.hero-search-real {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+.search-fade-enter-active,
+.search-fade-leave-active {
+  transition: opacity 0.15s;
+}
+.search-fade-enter-from,
+.search-fade-leave-to {
+  opacity: 0;
 }
 </style>

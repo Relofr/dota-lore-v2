@@ -1,0 +1,10 @@
+{
+  "name": "dota-lore-tts",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@aws-sdk/client-polly": "^3.0.0",
+    "aws4fetch": "^1.0.20"
+  }
+}
