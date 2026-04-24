@@ -1,6 +1,6 @@
 <script setup>
-import { computed } from "vue";
-import { useRoute, RouterLink } from "vue-router";
+import { computed, ref, watch } from "vue";
+import { useRoute, useRouter, RouterLink } from "vue-router";
 import { useHeroes } from "@/composables/useHeroes.js";
 import LoreText from "@/components/LoreText.vue";
 
@@ -11,11 +11,26 @@ import defenseIcon from "@/assets/images/defense.svg";
 import mobilityIcon from "@/assets/images/mobility.svg";
 
 const route = useRoute();
+const router = useRouter();
 const { heroes, loading } = useHeroes();
+
+const videoReady = ref(false)
+watch(() => route.params.id, () => { videoReady.value = false })
+
+function goToRandom() {
+  const others = heroes.value.filter(h => h.id !== route.params.id)
+  if (!others.length) return
+  const pick = others[Math.floor(Math.random() * others.length)]
+  router.push(`/heroes/${pick.id}`)
+}
 
 const hero = computed(
   () => heroes.value.find((h) => h.id === route.params.id) || null,
 );
+
+const heroIndex = computed(() => heroes.value.findIndex(h => h.id === route.params.id))
+const prevHero = computed(() => heroIndex.value > 0 ? heroes.value[heroIndex.value - 1] : heroes.value[heroes.value.length - 1])
+const nextHero = computed(() => heroIndex.value < heroes.value.length - 1 ? heroes.value[heroIndex.value + 1] : heroes.value[0])
 
 const ESCAPE_RE = /[.*+?^${}()|[\]\\]/g
 
@@ -114,11 +129,29 @@ function fmt(n, decimals = 0) {
 
   <!-- Hero detail -->
   <div v-else class="hero-detail">
-    <nav class="breadcrumb">
-      <RouterLink to="/heroes">Heroes</RouterLink>
-      <span>→</span>
-      <span>{{ hero.name }}</span>
-    </nav>
+    <div class="top-bar">
+      <nav class="breadcrumb">
+        <RouterLink to="/heroes">Heroes</RouterLink>
+        <span>→</span>
+        <span>{{ hero.name }}</span>
+      </nav>
+    </div>
+
+    <div v-if="heroes.length > 1" class="hero-nav">
+      <RouterLink :to="`/heroes/${prevHero.id}`" class="hero-nav-btn">
+        <span class="hero-nav-arrow">←</span>
+        <img :src="prevHero.iconUrl" :alt="prevHero.name" class="hero-nav-icon" />
+        <span class="hero-nav-name">{{ prevHero.name }}</span>
+      </RouterLink>
+      <button class="hero-nav-random" title="Random hero" @click="goToRandom">
+        <svg xmlns="http://www.w3.org/2000/svg" height="32px" viewBox="0 -960 960 960" width="32px" fill="currentColor"><path d="M682.5-277.5Q700-295 700-320t-17.5-42.5Q665-380 640-380t-42.5 17.5Q580-345 580-320t17.5 42.5Q615-260 640-260t42.5-17.5Zm-160-160Q540-455 540-480t-17.5-42.5Q505-540 480-540t-42.5 17.5Q420-505 420-480t17.5 42.5Q455-420 480-420t42.5-17.5Zm-160-160Q380-615 380-640t-17.5-42.5Q345-700 320-700t-42.5 17.5Q260-665 260-640t17.5 42.5Q295-580 320-580t42.5-17.5ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z"/></svg>
+      </button>
+      <RouterLink :to="`/heroes/${nextHero.id}`" class="hero-nav-btn">
+        <span class="hero-nav-name">{{ nextHero.name }}</span>
+        <img :src="nextHero.iconUrl" :alt="nextHero.name" class="hero-nav-icon" />
+        <span class="hero-nav-arrow">→</span>
+      </RouterLink>
+    </div>
 
     <div class="hero-header">
       <div class="hero-meta">
@@ -219,9 +252,20 @@ function fmt(n, decimals = 0) {
             </div>
           </div>
         </div>
+
       </div>
 
-      <div class="hero-portrait-wrap" :class="`portrait-${hero.id}`">
+      <div
+        class="hero-portrait-wrap"
+        :class="`portrait-${hero.id}`"
+      >
+        <img
+          v-if="!videoReady"
+          :key="`poster-${hero.id}`"
+          class="hero-portrait-img hero-portrait-poster"
+          :src="`https://cdn.steamstatic.com/apps/dota2/videos/dota_react/heroes/renders/${hero.id}.png`"
+          :alt="hero.name"
+        />
         <video
           :key="hero.id"
           class="hero-portrait-img"
@@ -231,6 +275,7 @@ function fmt(n, decimals = 0) {
           preload="auto"
           loop
           playsinline
+          @canplay="videoReady = true"
         >
           <source
             type="video/webm"
@@ -299,11 +344,14 @@ function fmt(n, decimals = 0) {
   max-width: 680px;
 }
 
+.top-bar {
+  margin-bottom: var(--spacing-lg);
+}
+
 .breadcrumb {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: var(--spacing-lg);
   font-size: 0.85rem;
   color: var(--color-text-muted);
 }
@@ -331,19 +379,29 @@ function fmt(n, decimals = 0) {
   top: 0;
   bottom: 0;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   pointer-events: none;
   z-index: 1;
 }
 
 .hero-portrait-img {
+  grid-area: 1 / 1;
   width: 60%;
   height: 100%;
   object-fit: contain;
   display: block;
   pointer-events: auto;
+}
+
+.hero-portrait-poster {
+  animation-name: portrait-fade-in;
+  animation-duration: 0.4s;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+
+video.hero-portrait-img {
   animation-name: portrait-fade-in;
   animation-duration: 1.3s;
   animation-timing-function: ease-out;
@@ -629,5 +687,87 @@ a.affiliation-badge:hover {
 
 .related-chip-name {
   white-space: nowrap;
+}
+
+.hero-nav {
+  position: fixed;
+  bottom: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: var(--spacing-md);
+  align-items: center;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 8px 16px;
+  z-index: 10;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.hero-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  transition: color 0.15s;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.hero-nav-next {
+  justify-content: flex-end;
+}
+
+.hero-nav-btn:hover {
+  color: var(--color-text);
+}
+
+.hero-nav-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.hero-nav-btn:hover .hero-nav-icon {
+  opacity: 1;
+}
+
+.hero-nav-random {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+
+.hero-nav-random:hover {
+  color: var(--color-text);
+}
+
+.hero-nav-random:hover svg {
+  animation: dice-roll 0.5s ease-in-out;
+}
+
+@keyframes dice-roll {
+  0%   { transform: rotate(0deg) scale(1); }
+  25%  { transform: rotate(-20deg) scale(1.15); }
+  50%  { transform: rotate(20deg) scale(1.2); }
+  75%  { transform: rotate(-10deg) scale(1.15); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+.hero-nav-arrow {
+  flex-shrink: 0;
 }
 </style>
