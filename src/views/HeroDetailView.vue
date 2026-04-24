@@ -132,24 +132,22 @@ function fmt(n, decimals = 0) {
     <div class="top-bar">
       <nav class="breadcrumb">
         <RouterLink to="/heroes">Heroes</RouterLink>
-        <span>→</span>
+        <svg xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z"/></svg>
         <span>{{ hero.name }}</span>
       </nav>
     </div>
 
     <div v-if="heroes.length > 1" class="hero-nav">
-      <RouterLink :to="`/heroes/${prevHero.id}`" class="hero-nav-btn">
-        <span class="hero-nav-arrow">←</span>
+      <RouterLink :to="`/heroes/${prevHero.id}`" class="hero-nav-btn hero-nav-prev">
+        <svg class="hero-nav-arrow" xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M560-240 320-480l240-240 56 56-184 184 184 184-56 56Z"/></svg>
         <img :src="prevHero.iconUrl" :alt="prevHero.name" class="hero-nav-icon" />
-        <span class="hero-nav-name">{{ prevHero.name }}</span>
       </RouterLink>
       <button class="hero-nav-random" title="Random hero" @click="goToRandom">
         <svg xmlns="http://www.w3.org/2000/svg" height="32px" viewBox="0 -960 960 960" width="32px" fill="currentColor"><path d="M682.5-277.5Q700-295 700-320t-17.5-42.5Q665-380 640-380t-42.5 17.5Q580-345 580-320t17.5 42.5Q615-260 640-260t42.5-17.5Zm-160-160Q540-455 540-480t-17.5-42.5Q505-540 480-540t-42.5 17.5Q420-505 420-480t17.5 42.5Q455-420 480-420t42.5-17.5Zm-160-160Q380-615 380-640t-17.5-42.5Q345-700 320-700t-42.5 17.5Q260-665 260-640t17.5 42.5Q295-580 320-580t42.5-17.5ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z"/></svg>
       </button>
       <RouterLink :to="`/heroes/${nextHero.id}`" class="hero-nav-btn">
-        <span class="hero-nav-name">{{ nextHero.name }}</span>
         <img :src="nextHero.iconUrl" :alt="nextHero.name" class="hero-nav-icon" />
-        <span class="hero-nav-arrow">→</span>
+        <svg class="hero-nav-arrow" xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z"/></svg>
       </RouterLink>
     </div>
 
@@ -351,7 +349,7 @@ function fmt(n, decimals = 0) {
 .breadcrumb {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 0.85rem;
   color: var(--color-text-muted);
 }
@@ -694,7 +692,8 @@ a.affiliation-badge:hover {
   bottom: var(--spacing-lg);
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto auto;
   gap: var(--spacing-md);
   align-items: center;
   background: var(--color-card-bg);
@@ -714,11 +713,22 @@ a.affiliation-badge:hover {
   font-size: 0.85rem;
   transition: color 0.15s;
   white-space: nowrap;
-  flex: 1;
+}
+
+.hero-nav-prev {
+  justify-content: flex-start;
+}
+
+.hero-nav-prev .hero-nav-name {
+  margin-left: auto;
 }
 
 .hero-nav-next {
   justify-content: flex-end;
+}
+
+.hero-nav-next .hero-nav-arrow {
+  margin-left: auto;
 }
 
 .hero-nav-btn:hover {
@@ -769,5 +779,6 @@ a.affiliation-badge:hover {
 
 .hero-nav-arrow {
   flex-shrink: 0;
+  display: block;
 }
 </style>
