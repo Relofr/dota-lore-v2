@@ -29,7 +29,8 @@ const searchResults = computed(() => {
   return heroes.value
     .filter(h => h.id !== route.params.id && (
       h.name.toLowerCase().includes(q) ||
-      (h.realName && h.realName.toLowerCase().includes(q))
+      (h.realName && h.realName.toLowerCase().includes(q)) ||
+      (h.affiliation && h.affiliation.toLowerCase().includes(q))
     ))
     .slice(0, 6)
 })
@@ -842,11 +843,11 @@ a.affiliation-badge:hover {
   gap: var(--spacing-md);
   align-items: center;
   background: var(--color-card-bg);
-  border: 1px solid var(--color-border);
+  border: 1px solid #2e3542;
   border-radius: 999px;
   padding: 8px 16px;
   z-index: 10;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 
 .hero-nav-btn {

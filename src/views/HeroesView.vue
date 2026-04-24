@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useHeroes, allRoles, allAttributes } from '@/composables/useHeroes.js'
 import HeroCard from '@/components/HeroCard.vue'
@@ -106,6 +106,18 @@ function clearFilters() {
 const hasActiveFilters = computed(
   () => searchQuery.value || selectedAttributes.value.length || selectedRoles.value.length || selectedFactions.value.length,
 )
+
+const searchInputEl = ref(null)
+
+function onGlobalKeydown(e) {
+  if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return
+  if (e.key.length === 1) {
+    searchInputEl.value?.focus()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
@@ -129,10 +141,11 @@ const hasActiveFilters = computed(
             <path d="M13 13L17 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
           <input
+            ref="searchInputEl"
             v-model="searchQuery"
             type="search"
             class="search-input"
-            placeholder="Search heroes, abilities, lore…"
+            placeholder="Begin typing to search"
             :disabled="loading"
           />
         </div>
