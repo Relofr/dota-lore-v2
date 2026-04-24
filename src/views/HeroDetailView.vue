@@ -917,9 +917,9 @@ a.affiliation-badge:hover {
 
 @keyframes dice-roll {
   0%   { transform: rotate(0deg) scale(1); }
-  25%  { transform: rotate(-20deg) scale(1.15); }
-  50%  { transform: rotate(20deg) scale(1.2); }
-  75%  { transform: rotate(-10deg) scale(1.15); }
+  25%  { transform: rotate(-10deg) scale(1.1); }
+  50%  { transform: rotate(10deg) scale(1.1); }
+  75%  { transform: rotate(-5deg) scale(1.1); }
   100% { transform: rotate(0deg) scale(1); }
 }
 
