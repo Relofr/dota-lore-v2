@@ -33,13 +33,14 @@ const searchResults = computed(() => {
       (h.affiliation && h.affiliation.toLowerCase().includes(q))
     ))
     .map(h => {
-      const matchedAffiliation =
-        h.affiliation &&
-        h.affiliation.toLowerCase().includes(q) &&
-        !h.name.toLowerCase().includes(q) &&
-        !(h.realName && h.realName.toLowerCase().includes(q))
-      return { hero: h, matchedAffiliation }
+      const nameMatch        = h.name.toLowerCase().includes(q)
+      const realNameMatch    = h.realName && h.realName.toLowerCase().includes(q)
+      const affiliationMatch = h.affiliation && h.affiliation.toLowerCase().includes(q)
+      const priority         = nameMatch ? 0 : realNameMatch ? 1 : 2
+      const matchedAffiliation = affiliationMatch && !nameMatch && !realNameMatch
+      return { hero: h, matchedAffiliation, priority }
     })
+    .sort((a, b) => a.priority - b.priority)
     .slice(0, 6)
 })
 

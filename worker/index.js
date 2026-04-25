@@ -6,21 +6,16 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 
+function corsResponse(body, status = 200, extra = {}) {
+  return new Response(body, { status, headers: { ...CORS, ...extra } })
+}
+
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
-    if (request.method !== 'POST')   return new Response('Method not allowed', { status: 405, headers: CORS })
+    if (request.method === 'OPTIONS') return corsResponse(null)
+    if (request.method !== 'POST')   return corsResponse('Method not allowed', 405)
 
-    const { text, debug } = await request.json()
-
-    if (debug) {
-      return new Response(JSON.stringify({
-        accessKeyStart: env.AWS_ACCESS_KEY?.slice(0, 4),
-        accessKeyLen:   env.AWS_ACCESS_KEY?.length,
-        secretKeyLen:   env.AWS_SECRET_KEY?.length,
-        voice:          env.POLLY_VOICE,
-      }), { headers: { ...CORS, 'Content-Type': 'application/json' } })
-    }
+    const { text } = await request.json()
 
     const aws = new AwsClient({
       accessKeyId:     env.AWS_ACCESS_KEY,
@@ -44,14 +39,12 @@ export default {
 
       if (!resp.ok) {
         const err = await resp.text()
-        return new Response(err, { status: resp.status, headers: CORS })
+        return corsResponse(err, resp.status)
       }
 
-      return new Response(resp.body, {
-        headers: { ...CORS, 'Content-Type': 'audio/mpeg' },
-      })
+      return corsResponse(resp.body, 200, { 'Content-Type': 'audio/mpeg' })
     } catch (err) {
-      return new Response(err.message, { status: 500, headers: CORS })
+      return corsResponse(err.message, 500)
     }
   },
 }
