@@ -32,8 +32,27 @@ const searchResults = computed(() => {
       (h.realName && h.realName.toLowerCase().includes(q)) ||
       (h.affiliation && h.affiliation.toLowerCase().includes(q))
     ))
+    .map(h => {
+      const matchedAffiliation =
+        h.affiliation &&
+        h.affiliation.toLowerCase().includes(q) &&
+        !h.name.toLowerCase().includes(q) &&
+        !(h.realName && h.realName.toLowerCase().includes(q))
+      return { hero: h, matchedAffiliation }
+    })
     .slice(0, 6)
 })
+
+function highlight(text, q) {
+  if (!text || !q) return [{ text, match: false }]
+  const idx = text.toLowerCase().indexOf(q.toLowerCase())
+  if (idx === -1) return [{ text, match: false }]
+  return [
+    { text: text.slice(0, idx), match: false },
+    { text: text.slice(idx, idx + q.length), match: true },
+    { text: text.slice(idx + q.length), match: false },
+  ].filter(s => s.text)
+}
 
 function openSearch() {
   searchOpen.value = true
@@ -189,6 +208,11 @@ function fmt(n, decimals = 0) {
         <RouterLink to="/heroes">Heroes</RouterLink>
         <svg xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z"/></svg>
         <span>{{ hero.name }}</span>
+        <span class="breadcrumb-divider">·</span>
+        <button class="search-hint" @click="openSearch">
+          <svg xmlns="http://www.w3.org/2000/svg" height="22px" viewBox="0 -960 960 960" width="22px" fill="currentColor"><path d="M160-200q-33 0-56.5-23.5T80-280v-400q0-33 23.5-56.5T160-760h640q33 0 56.5 23.5T880-680v400q0 33-23.5 56.5T800-200H160Zm0-80h640v-400H160v400Zm160-40h320v-80H320v80ZM200-400h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80ZM200-520h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Z"/></svg>
+          <span>Type to search...</span>
+        </button>
       </nav>
     </div>
 
@@ -368,14 +392,22 @@ function fmt(n, decimals = 0) {
           />
           <div v-if="searchResults.length" class="hero-search-results">
             <button
-              v-for="h in searchResults"
-              :key="h.id"
+              v-for="r in searchResults"
+              :key="r.hero.id"
               class="hero-search-result"
-              @click="goToResult(h)"
+              @click="goToResult(r.hero)"
             >
-              <img :src="h.iconUrl" :alt="h.name" class="hero-search-icon" />
-              <span class="hero-search-name">{{ h.name }}</span>
-              <span v-if="h.realName !== h.name" class="hero-search-real">{{ h.realName }}</span>
+              <img :src="r.hero.iconUrl" :alt="r.hero.name" class="hero-search-icon" />
+              <span class="hero-search-info">
+                <span class="hero-search-name">{{ r.hero.name }}</span>
+                <span v-if="r.matchedAffiliation" class="hero-search-match">
+                  <template v-for="seg in highlight(r.hero.affiliation, searchQuery)" :key="seg.text">
+                    <mark v-if="seg.match" class="hero-search-highlight">{{ seg.text }}</mark>
+                    <template v-else>{{ seg.text }}</template>
+                  </template>
+                </span>
+              </span>
+              <span v-if="r.hero.realName !== r.hero.name" class="hero-search-real">{{ r.hero.realName }}</span>
             </button>
           </div>
         </div>
@@ -443,6 +475,30 @@ function fmt(n, decimals = 0) {
 
 .top-bar {
   margin-bottom: var(--spacing-lg);
+}
+
+.breadcrumb-divider {
+  color: var(--color-border);
+}
+
+.search-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-family: inherit;
+  opacity: 0.7;
+  transition: opacity 0.15s, color 0.15s;
+  padding: 0;
+}
+
+.search-hint:hover {
+  opacity: 1;
+  color: var(--color-text);
 }
 
 .breadcrumb {
@@ -993,10 +1049,28 @@ a.affiliation-badge:hover {
   flex-shrink: 0;
 }
 
+.hero-search-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  gap: 2px;
+}
+
 .hero-search-name {
   color: var(--color-text);
   font-size: 0.9rem;
-  flex: 1;
+}
+
+.hero-search-match {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.hero-search-highlight {
+  background: none;
+  color: var(--color-accent);
+  font-weight: 600;
 }
 
 .hero-search-real {
