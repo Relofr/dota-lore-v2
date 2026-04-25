@@ -72,7 +72,7 @@ function goToResult(hero) {
 
 function onSearchKeydown(e) {
   if (e.key === 'Enter' && searchResults.value.length) {
-    goToResult(searchResults.value[0])
+    goToResult(searchResults.value[0].hero)
   } else if (e.key === 'Escape') {
     closeSearch()
   }
@@ -209,10 +209,10 @@ function fmt(n, decimals = 0) {
         <svg xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z"/></svg>
         <span>{{ hero.name }}</span>
         <span class="breadcrumb-divider">·</span>
-        <button class="search-hint" @click="openSearch">
+        <span class="search-hint">
           <svg xmlns="http://www.w3.org/2000/svg" height="22px" viewBox="0 -960 960 960" width="22px" fill="currentColor"><path d="M160-200q-33 0-56.5-23.5T80-280v-400q0-33 23.5-56.5T160-760h640q33 0 56.5 23.5T880-680v400q0 33-23.5 56.5T800-200H160Zm0-80h640v-400H160v400Zm160-40h320v-80H320v80ZM200-400h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80ZM200-520h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Z"/></svg>
           <span>Type to search...</span>
-        </button>
+        </span>
       </nav>
     </div>
 
@@ -407,7 +407,7 @@ function fmt(n, decimals = 0) {
                   </template>
                 </span>
               </span>
-              <span v-if="r.hero.realName !== r.hero.name" class="hero-search-real">{{ r.hero.realName }}</span>
+              <span v-if="r.hero.realName && r.hero.realName !== r.hero.name" class="hero-search-real">{{ r.hero.realName }}</span>
             </button>
           </div>
         </div>
@@ -485,20 +485,9 @@ function fmt(n, decimals = 0) {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: none;
-  border: none;
-  cursor: pointer;
   color: var(--color-text-muted);
   font-size: 0.78rem;
-  font-family: inherit;
   opacity: 0.7;
-  transition: opacity 0.15s, color 0.15s;
-  padding: 0;
-}
-
-.search-hint:hover {
-  opacity: 1;
-  color: var(--color-text);
 }
 
 .breadcrumb {
