@@ -490,6 +490,13 @@ function fmt(n, decimals = 0) {
   opacity: 0.7;
 }
 
+@media (max-width: 768px) {
+  .search-hint,
+  .breadcrumb-divider {
+    display: none;
+  }
+}
+
 .breadcrumb {
   display: flex;
   align-items: center;
