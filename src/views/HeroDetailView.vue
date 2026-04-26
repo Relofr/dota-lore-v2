@@ -491,7 +491,7 @@ function fmt(n, decimals = 0) {
   opacity: 0.7;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   .search-hint,
   .breadcrumb-divider {
     display: none;
@@ -525,6 +525,7 @@ function fmt(n, decimals = 0) {
 
 .hero-portrait-wrap {
   position: fixed;
+  left: 45%;
   right: 0;
   top: 0;
   bottom: 0;
@@ -537,8 +538,9 @@ function fmt(n, decimals = 0) {
 
 .hero-portrait-img {
   grid-area: 1 / 1;
-  width: 60%;
-  height: 100%;
+  width: min(35vw, calc(100vw - 740px));
+  height: auto;
+  max-height: 100%;
   object-fit: contain;
   display: block;
   pointer-events: auto;
@@ -575,7 +577,17 @@ video.hero-portrait-img {
   margin-right: 2%;
 }
 
-@media (max-width: 900px) {
+.portrait-primal_beast {
+  justify-items: end;
+}
+
+.portrait-primal_beast .hero-portrait-img {
+  object-fit: contain;
+  width: 48%;
+  margin-right: 2%;
+}
+
+@media (max-width: 1100px) {
   .hero-layout {
     display: flex;
     flex-direction: column;
@@ -583,6 +595,7 @@ video.hero-portrait-img {
 
   .hero-content {
     max-width: 100%;
+    padding-right: 0;
     order: 2;
   }
 
@@ -595,7 +608,19 @@ video.hero-portrait-img {
   }
 
   .hero-portrait-img {
-    max-height: 100%;
+    width: 55%;
+    height: 100%;
+  }
+
+  .portrait-broodmother,
+  .portrait-primal_beast {
+    justify-items: center;
+  }
+
+  .portrait-broodmother .hero-portrait-img,
+  .portrait-primal_beast .hero-portrait-img {
+    width: 100%;
+    margin-right: 0;
   }
 }
 

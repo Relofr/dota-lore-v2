@@ -70,7 +70,7 @@ function getSegments(text) {
   const escaped = entities.value.map(e =>
     e.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   )
-  const pattern = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi')
+  const pattern = new RegExp(`\\b(${escaped.join('|')})\\b`, 'g')
   const result = []
   let lastIndex = 0
   let match
@@ -79,7 +79,7 @@ function getSegments(text) {
       result.push({ type: 'text', content: text.slice(lastIndex, match.index) })
     }
     const entity = entities.value.find(
-      e => e.name.toLowerCase() === match[0].toLowerCase()
+      e => e.name === match[0]
     )
     result.push({ type: 'link', content: match[0], route: entity.route, entity })
     lastIndex = match.index + match[0].length
