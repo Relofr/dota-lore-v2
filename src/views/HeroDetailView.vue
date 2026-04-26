@@ -567,24 +567,12 @@ video.hero-portrait-img {
   to   { opacity: 1; }
 }
 
-.portrait-broodmother {
-  justify-items: end;
-}
-
-.portrait-broodmother .hero-portrait-img {
-  object-fit: contain;
-  width: 48%;
-  margin-right: 2%;
-}
-
-.portrait-primal_beast {
-  justify-items: end;
-}
-
+.portrait-broodmother .hero-portrait-img,
 .portrait-primal_beast .hero-portrait-img {
-  object-fit: contain;
-  width: 48%;
-  margin-right: 2%;
+  width: min(35vw, calc(100vw - 740px));
+  height: auto;
+  max-height: 100%;
+  margin-right: 0;
 }
 
 @media (max-width: 1100px) {
@@ -612,15 +600,10 @@ video.hero-portrait-img {
     height: 100%;
   }
 
-  .portrait-broodmother,
-  .portrait-primal_beast {
-    justify-items: center;
-  }
-
   .portrait-broodmother .hero-portrait-img,
   .portrait-primal_beast .hero-portrait-img {
-    width: 100%;
-    margin-right: 0;
+    width: auto;
+    height: 100%;
   }
 }
 
