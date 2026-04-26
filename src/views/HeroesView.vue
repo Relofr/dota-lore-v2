@@ -91,9 +91,7 @@ function toggleRole(role) {
 }
 
 function toggleFaction(id) {
-  const idx = selectedFactions.value.indexOf(id)
-  if (idx >= 0) selectedFactions.value.splice(idx, 1)
-  else selectedFactions.value.push(id)
+  selectedFactions.value = selectedFactions.value.includes(id) ? [] : [id]
 }
 
 function clearFilters() {
