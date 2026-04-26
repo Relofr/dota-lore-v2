@@ -1,121 +1,145 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useHeroes, allRoles, allAttributes } from '@/composables/useHeroes.js'
-import HeroCard from '@/components/HeroCard.vue'
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useHeroes, allRoles, allAttributes } from "@/composables/useHeroes.js";
+import HeroCard from "@/components/HeroCard.vue";
 
 const ATTR_ICONS = {
-  strength:     'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png',
-  agility:      'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png',
-  intelligence: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_intelligence.png',
-  universal:    'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png',
-}
+  strength:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png",
+  agility:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png",
+  intelligence:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_intelligence.png",
+  universal:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png",
+};
 
 const ATTR_LABELS = {
-  strength: 'Strength',
-  agility: 'Agility',
-  intelligence: 'Intelligence',
-  universal: 'Universal',
-}
+  strength: "Strength",
+  agility: "Agility",
+  intelligence: "Intelligence",
+  universal: "Universal",
+};
 
-const route = useRoute()
-const router = useRouter()
-const { heroes, loading, error } = useHeroes()
+const route = useRoute();
+const router = useRouter();
+const { heroes, loading, error } = useHeroes();
 
-const searchQuery = ref(route.query.q || '')
-const selectedAttributes = ref(route.query.attr ? [].concat(route.query.attr) : [])
-const selectedRoles = ref(route.query.role ? [].concat(route.query.role) : [])
-const selectedFactions = ref(route.query.faction ? [].concat(route.query.faction) : [])
+const searchQuery = ref(route.query.q || "");
+const selectedAttributes = ref(
+  route.query.attr ? [].concat(route.query.attr) : [],
+);
+const selectedRoles = ref(route.query.role ? [].concat(route.query.role) : []);
+const selectedFactions = ref(
+  route.query.faction ? [].concat(route.query.faction) : [],
+);
 
-watch([searchQuery, selectedAttributes, selectedRoles, selectedFactions], () => {
-  router.replace({
-    query: {
-      ...(searchQuery.value ? { q: searchQuery.value } : {}),
-      ...(selectedAttributes.value.length ? { attr: selectedAttributes.value } : {}),
-      ...(selectedRoles.value.length ? { role: selectedRoles.value } : {}),
-      ...(selectedFactions.value.length ? { faction: selectedFactions.value } : {}),
-    }
-  })
-}, { deep: true })
+watch(
+  [searchQuery, selectedAttributes, selectedRoles, selectedFactions],
+  () => {
+    router.replace({
+      query: {
+        ...(searchQuery.value ? { q: searchQuery.value } : {}),
+        ...(selectedAttributes.value.length
+          ? { attr: selectedAttributes.value }
+          : {}),
+        ...(selectedRoles.value.length ? { role: selectedRoles.value } : {}),
+        ...(selectedFactions.value.length
+          ? { faction: selectedFactions.value }
+          : {}),
+      },
+    });
+  },
+  { deep: true },
+);
 
 const allFactions = computed(() => {
-  const seen = new Map()
+  const seen = new Map();
   for (const hero of heroes.value) {
     if (hero.factionId && !seen.has(hero.factionId)) {
-      seen.set(hero.factionId, hero.affiliation)
+      seen.set(hero.factionId, hero.affiliation);
     }
   }
   return [...seen.entries()]
     .map(([id, label]) => ({ id, label }))
-    .sort((a, b) => a.label.localeCompare(b.label))
-})
+    .sort((a, b) => a.label.localeCompare(b.label));
+});
 
 const filteredHeroes = computed(() => {
   return heroes.value.filter((hero) => {
-    const q = searchQuery.value.toLowerCase()
+    const q = searchQuery.value.toLowerCase();
     const matchesSearch =
       !q ||
       hero.name.toLowerCase().includes(q) ||
       (hero.realName && hero.realName.toLowerCase().includes(q)) ||
+      (hero.affiliation && hero.affiliation.toLowerCase().includes(q)) ||
       (hero.lore && hero.lore.toLowerCase().includes(q)) ||
       hero.abilities.some(
-        a => a.displayName.toLowerCase().includes(q) || a.lore.toLowerCase().includes(q),
-      )
+        (a) =>
+          a.displayName.toLowerCase().includes(q) ||
+          a.lore.toLowerCase().includes(q),
+      );
 
     const matchesAttribute =
       selectedAttributes.value.length === 0 ||
-      selectedAttributes.value.includes(hero.primaryAttribute)
+      selectedAttributes.value.includes(hero.primaryAttribute);
 
     const matchesRole =
       selectedRoles.value.length === 0 ||
-      selectedRoles.value.every((role) => hero.roles.includes(role))
+      selectedRoles.value.every((role) => hero.roles.includes(role));
 
     const matchesFaction =
       selectedFactions.value.length === 0 ||
-      selectedFactions.value.includes(hero.factionId)
+      selectedFactions.value.includes(hero.factionId);
 
-    return matchesSearch && matchesAttribute && matchesRole && matchesFaction
-  })
-})
+    return matchesSearch && matchesAttribute && matchesRole && matchesFaction;
+  });
+});
 
 function toggleAttribute(attr) {
-  const idx = selectedAttributes.value.indexOf(attr)
-  if (idx >= 0) selectedAttributes.value.splice(idx, 1)
-  else selectedAttributes.value.push(attr)
+  const idx = selectedAttributes.value.indexOf(attr);
+  if (idx >= 0) selectedAttributes.value.splice(idx, 1);
+  else selectedAttributes.value.push(attr);
 }
 
 function toggleRole(role) {
-  const idx = selectedRoles.value.indexOf(role)
-  if (idx >= 0) selectedRoles.value.splice(idx, 1)
-  else selectedRoles.value.push(role)
+  const idx = selectedRoles.value.indexOf(role);
+  if (idx >= 0) selectedRoles.value.splice(idx, 1);
+  else selectedRoles.value.push(role);
 }
 
 function toggleFaction(id) {
-  selectedFactions.value = selectedFactions.value.includes(id) ? [] : [id]
+  selectedFactions.value = selectedFactions.value.includes(id) ? [] : [id];
 }
 
 function clearFilters() {
-  searchQuery.value = ''
-  selectedAttributes.value = []
-  selectedRoles.value = []
-  selectedFactions.value = []
+  searchQuery.value = "";
+  selectedAttributes.value = [];
+  selectedRoles.value = [];
+  selectedFactions.value = [];
 }
 
 const hasActiveFilters = computed(
-  () => searchQuery.value || selectedAttributes.value.length || selectedRoles.value.length || selectedFactions.value.length,
-)
+  () =>
+    searchQuery.value ||
+    selectedAttributes.value.length ||
+    selectedRoles.value.length ||
+    selectedFactions.value.length,
+);
 
-const searchInputEl = ref(null)
+const searchInputEl = ref(null);
 
 function onGlobalKeydown(e) {
-  if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return
+  if (e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey || e.altKey)
+    return;
   if (e.key.length === 1) {
-    searchInputEl.value?.focus()
+    searchInputEl.value?.focus();
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
+onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
+onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
 </script>
 
 <template>
@@ -125,27 +149,51 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
       <p class="page-desc">
         <template v-if="loading">Loading heroes…</template>
         <template v-else-if="error">{{ error }}</template>
-        <template v-else>
-          {{ heroes.length }} heroes
-        </template>
+        <template v-else> {{ heroes.length }} heroes </template>
       </p>
     </div>
 
     <div class="filters">
       <div class="search-row">
         <div class="search-wrap">
-          <svg class="search-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M13 13L17 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <svg
+            class="search-icon"
+            xmlns="http://www.w3.org/2000/svg"
+            height="22px"
+            viewBox="0 -960 960 960"
+            width="22px"
+            fill="currentColor"
+          >
+            <path
+              d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"
+            />
           </svg>
           <input
             ref="searchInputEl"
             v-model="searchQuery"
-            type="search"
+            type="text"
             class="search-input"
             placeholder="Begin typing to search"
             :disabled="loading"
           />
+          <button
+            v-if="searchQuery"
+            class="search-clear-btn"
+            @click="searchQuery = ''"
+            tabindex="-1"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="20px"
+              viewBox="0 -960 960 960"
+              width="20px"
+              fill="currentColor"
+            >
+              <path
+                d="M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z"
+              />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -154,7 +202,11 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
           <button
             v-for="attr in allAttributes"
             :key="attr"
-            :class="['attr-btn', `attr-${attr}`, { active: selectedAttributes.includes(attr) }]"
+            :class="[
+              'attr-btn',
+              `attr-${attr}`,
+              { active: selectedAttributes.includes(attr) },
+            ]"
             :title="attr.charAt(0).toUpperCase() + attr.slice(1)"
             @click="toggleAttribute(attr)"
           >
@@ -175,14 +227,16 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
             {{ role }}
           </button>
         </div>
-
       </div>
 
       <div v-if="allFactions.length" class="filter-row faction-row">
         <button
           v-for="faction in allFactions"
           :key="faction.id"
-          :class="['faction-btn', { active: selectedFactions.includes(faction.id) }]"
+          :class="[
+            'faction-btn',
+            { active: selectedFactions.includes(faction.id) },
+          ]"
           @click="toggleFaction(faction.id)"
         >
           {{ faction.label }}
@@ -190,7 +244,9 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
       </div>
 
       <div v-if="hasActiveFilters" class="clear-row">
-        <button class="clear-all-btn" @click="clearFilters">Clear all filters</button>
+        <button class="clear-all-btn" @click="clearFilters">
+          Clear all filters
+        </button>
       </div>
     </div>
 
@@ -203,13 +259,15 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
     </div>
 
     <div v-else-if="filteredHeroes.length === 0" class="empty-state">
-      <p>No heroes match your filters.</p>
+      <p>No heroes match your filters</p>
       <button class="clear-btn" @click="clearFilters">Clear filters</button>
     </div>
 
     <div v-else>
       <p class="results-count">
-        {{ filteredHeroes.length }} hero{{ filteredHeroes.length !== 1 ? 'es' : '' }}
+        {{ filteredHeroes.length }} hero{{
+          filteredHeroes.length !== 1 ? "es" : ""
+        }}
       </p>
       <div class="hero-grid">
         <HeroCard v-for="hero in filteredHeroes" :key="hero.id" :hero="hero" />
@@ -265,8 +323,8 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   color: var(--color-text-muted);
   pointer-events: none;
 }
@@ -274,7 +332,7 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 .search-input {
   width: 100%;
   height: 42px;
-  padding: 0 16px 0 38px;
+  padding: 0 36px 0 38px;
   background: var(--color-card-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -288,6 +346,26 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 
 .search-input:focus {
   border-color: var(--color-accent);
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.search-clear-btn:hover {
+  opacity: 1;
 }
 
 .clear-btn {
@@ -376,10 +454,26 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
   color: var(--color-text);
 }
 
-.attr-btn.attr-strength.active  { background: #c83c3c22; border-color: #c83c3c; color: #e05555; }
-.attr-btn.attr-agility.active   { background: #3ca05022; border-color: #3ca050; color: #4ebb65; }
-.attr-btn.attr-intelligence.active { background: #3c64c822; border-color: #3c64c8; color: #5a80e0; }
-.attr-btn.attr-universal.active { background: #8c50c822; border-color: #8c50c8; color: #a870e0; }
+.attr-btn.attr-strength.active {
+  background: #c83c3c22;
+  border-color: #c83c3c;
+  color: #e05555;
+}
+.attr-btn.attr-agility.active {
+  background: #3ca05022;
+  border-color: #3ca050;
+  color: #4ebb65;
+}
+.attr-btn.attr-intelligence.active {
+  background: #3c64c822;
+  border-color: #3c64c8;
+  color: #5a80e0;
+}
+.attr-btn.attr-universal.active {
+  background: #8c50c822;
+  border-color: #8c50c8;
+  color: #a870e0;
+}
 
 .filter-divider {
   width: 1px;
@@ -474,14 +568,23 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .empty-state {
   text-align: center;
   padding: calc(var(--spacing-lg) * 2);
   color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
 .error-state {

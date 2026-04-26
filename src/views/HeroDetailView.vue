@@ -110,7 +110,7 @@ const nextHero = computed(() => heroIndex.value < heroes.value.length - 1 ? hero
 const ESCAPE_RE = /[.*+?^${}()|[\]\\]/g
 
 function getExcerpt(loreText, name) {
-  const re = new RegExp(`\\b${name.replace(ESCAPE_RE, '\\$&')}\\b`, 'i')
+  const re = new RegExp(`\\b${name.replace(ESCAPE_RE, '\\$&')}\\b`)
   const flat = loreText.replace(/\n/g, ' ')
   const match = re.exec(flat)
   if (!match) return null
@@ -142,7 +142,7 @@ const relatedHeroes = computed(() => {
     if (other.realName && other.realName !== other.name) otherNames.push(other.realName)
 
     const forwardMatch = otherNames.find(n =>
-      new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`, 'i').test(loreText)
+      new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`).test(loreText)
     )
     if (forwardMatch) {
       results.push({ hero: other, excerpt: getExcerpt(loreText, forwardMatch) })
@@ -151,7 +151,7 @@ const relatedHeroes = computed(() => {
 
     const otherLore = other.lore || ''
     const reverseMatch = currentNames.find(n =>
-      new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`, 'i').test(otherLore)
+      new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`).test(otherLore)
     )
     if (reverseMatch) {
       results.push({ hero: other, excerpt: getExcerpt(otherLore, reverseMatch) })
@@ -1046,6 +1046,7 @@ a.affiliation-badge:hover {
   background: color-mix(in srgb, var(--color-accent) 8%, #252b36);
 }
 
+
 .hero-search-icon {
   width: 32px;
   height: 32px;
@@ -1083,6 +1084,7 @@ a.affiliation-badge:hover {
   font-size: 0.78rem;
   font-style: italic;
 }
+
 
 .search-fade-enter-active,
 .search-fade-leave-active {
