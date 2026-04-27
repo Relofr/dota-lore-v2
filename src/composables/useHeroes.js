@@ -88,7 +88,7 @@ function mapHero(apiHero, abilityLoreMap, talentMap) {
 
   const abilities = sortedSlots
     .map(({ abilityId }) => abilityLoreMap.get(abilityId))
-    .filter(a => a && (a.isInnate || a.lore || a.scepterDescription || a.shardDescription))
+    .filter(a => a && !a.isInnate)
     .sort((a, b) => (b.isInnate ? 1 : 0) - (a.isInnate ? 1 : 0))
 
   const talents = sortedSlots
@@ -152,8 +152,8 @@ async function loadHeroes() {
       const description        = cleanLore(ab.language?.description) || null
       const scepterDescription = cleanLore(ab.language?.aghanimDescription) || null
       const shardDescription   = cleanLore(ab.language?.shardDescription)   || null
-      const effectiveLore = lore || ((isGrantedByScepter || isGrantedByShard) ? description : null)
-      if (!effectiveLore && !scepterDescription && !shardDescription && !isInnate) continue
+      const effectiveLore = lore || description
+      if (!ab.language?.displayName) continue
       abilityLoreMap.set(ab.id, {
         id: ab.id,
         name: ab.name,

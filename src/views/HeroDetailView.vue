@@ -4,6 +4,7 @@ import { useRoute, useRouter, RouterLink } from "vue-router";
 import { useHeroes } from "@/composables/useHeroes.js";
 import { useSpeech } from "@/composables/useSpeech.js";
 import LoreText from "@/components/LoreText.vue";
+import UpgradeBadge from "@/components/UpgradeBadge.vue";
 
 import meleeIcon   from "@/assets/images/melee.svg";
 import rangedIcon  from "@/assets/images/ranged.svg";
@@ -19,18 +20,12 @@ const videoReady = ref(false)
 const { speaking, paused, loading: ttsLoading, supported, toggle: toggleSpeech, stop: stopSpeech } = useSpeech()
 watch(() => route.params.id, () => { videoReady.value = false; stopSpeech() })
 
-const searchOpen    = ref(false)
-const searchQuery   = ref('')
-const debouncedQuery = ref('')
-let searchTimer = null
-watch(searchQuery, val => {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => { debouncedQuery.value = val }, 300)
-})
+const searchOpen  = ref(false)
+const searchQuery = ref('')
 const searchInput = ref(null)
 
 const searchResults = computed(() => {
-  const q = debouncedQuery.value.trim().toLowerCase()
+  const q = searchQuery.value.trim().toLowerCase()
   if (!q) return []
   return heroes.value
     .filter(h => h.id !== route.params.id && (
@@ -71,8 +66,6 @@ function openSearch() {
 function closeSearch() {
   searchOpen.value = false
   searchQuery.value = ''
-  debouncedQuery.value = ''
-  clearTimeout(searchTimer)
 }
 
 function goToResult(hero) {
@@ -178,8 +171,6 @@ const factionHeroes = computed(() => {
   )
 })
 
-const SCEPTER_ICON = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/items/ultimate_scepter.png'
-const SHARD_ICON   = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/items/aghanims_shard.png'
 const INNATE_ICON  = 'https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/innate_icon.png'
 const TALENTS_ICON = 'https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/talents.svg'
 
@@ -380,20 +371,8 @@ function fmt(n, decimals = 0) {
                 />
                 <h3 class="ability-name">{{ ab.displayName }}</h3>
                 <div v-if="ab.hasScepter || ab.hasShard" class="ability-upgrades">
-                  <img
-                    v-if="ab.hasScepter"
-                    class="upgrade-badge"
-                    :src="SCEPTER_ICON"
-                    alt="Aghanim's Scepter"
-                    :title="ab.isGrantedByScepter ? 'Granted by Aghanim\'s Scepter' : 'Aghanim\'s Scepter upgrade'"
-                  />
-                  <img
-                    v-if="ab.hasShard"
-                    class="upgrade-badge"
-                    :src="SHARD_ICON"
-                    alt="Aghanim's Shard"
-                    :title="ab.isGrantedByShard ? 'Granted by Aghanim\'s Shard' : 'Aghanim\'s Shard upgrade'"
-                  />
+                  <UpgradeBadge v-if="ab.hasScepter" type="scepter" />
+                  <UpgradeBadge v-if="ab.hasShard"   type="shard" />
                 </div>
               </div>
               <div v-if="ab.isInnate && ab.description" class="innate-description">{{ ab.description }}</div>
@@ -402,14 +381,14 @@ function fmt(n, decimals = 0) {
               </div>
               <div v-if="ab.scepterDescription" class="upgrade-section scepter-section">
                 <div class="upgrade-header">
-                  <img class="upgrade-icon" :src="SCEPTER_ICON" alt="Aghanim's Scepter" />
+                  <UpgradeBadge type="scepter" />
                   <span class="upgrade-label scepter-label">Aghanim's Scepter</span>
                 </div>
                 <p class="upgrade-description">{{ ab.scepterDescription }}</p>
               </div>
               <div v-if="ab.shardDescription" class="upgrade-section shard-section">
                 <div class="upgrade-header">
-                  <img class="upgrade-icon" :src="SHARD_ICON" alt="Aghanim's Shard" />
+                  <UpgradeBadge type="shard" />
                   <span class="upgrade-label shard-label">Aghanim's Shard</span>
                 </div>
                 <p class="upgrade-description">{{ ab.shardDescription }}</p>
@@ -997,18 +976,6 @@ a.affiliation-badge:hover {
   flex-shrink: 0;
 }
 
-.upgrade-badge {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  object-fit: cover;
-  opacity: 0.75;
-  transition: opacity 0.15s;
-}
-
-.upgrade-badge:hover {
-  opacity: 1;
-}
 
 .upgrade-section {
   margin-top: 10px;
@@ -1023,13 +990,6 @@ a.affiliation-badge:hover {
   margin-bottom: 5px;
 }
 
-.upgrade-icon {
-  width: 16px;
-  height: 16px;
-  border-radius: 3px;
-  object-fit: cover;
-  opacity: 0.9;
-}
 
 .upgrade-label {
   font-size: 0.68rem;
