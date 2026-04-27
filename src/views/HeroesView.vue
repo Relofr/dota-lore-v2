@@ -85,6 +85,7 @@ const filteredHeroes = computed(() => {
       hero.name?.toLowerCase().includes(q) ||
       (hero.realName && hero.realName.toLowerCase().includes(q)) ||
       (hero.affiliation && hero.affiliation.toLowerCase().includes(q)) ||
+      (wordRe && hero.shortLore && wordRe.test(hero.shortLore)) ||
       (wordRe && hero.lore && wordRe.test(hero.lore)) ||
       (wordRe && hero.abilities.some(
         (a) =>

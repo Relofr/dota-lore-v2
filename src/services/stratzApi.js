@@ -52,6 +52,7 @@ const HEROES_QUERY = `{
         hasShardUpgrade
         isGrantedByShard
         isInnate
+        isOnLearnbar
       }
     }
   }

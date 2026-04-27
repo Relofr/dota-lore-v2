@@ -199,6 +199,20 @@ const attributeIcons = {
   universal:    'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png',
 };
 
+function numberSegments(text) {
+  if (!text) return []
+  const parts = []
+  const re = /\d+(?:\.\d+)?%?/g
+  let last = 0, m
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push({ num: false, text: text.slice(last, m.index) })
+    parts.push({ num: true, text: m[0] })
+    last = re.lastIndex
+  }
+  if (last < text.length) parts.push({ num: false, text: text.slice(last) })
+  return parts
+}
+
 function fmt(n, decimals = 0) {
   return typeof n === 'number' ? +n.toFixed(decimals) : n
 }
@@ -289,6 +303,11 @@ function fmt(n, decimals = 0) {
     <!-- Single flex row: all content left, portrait sticky right -->
     <div class="hero-layout">
       <div class="hero-content">
+        <div v-if="hero.shortLore" class="lore-section">
+          <h2>Details</h2>
+          <LoreText :lore="hero.shortLore" :hero-id="hero.id" />
+        </div>
+
         <div v-if="hero.lore" class="lore-section">
           <div class="lore-heading">
             <h2>Lore</h2>
@@ -375,8 +394,13 @@ function fmt(n, decimals = 0) {
                   <UpgradeBadge v-if="ab.hasShard"   type="shard" />
                 </div>
               </div>
-              <div v-if="ab.isInnate && ab.description" class="innate-description">{{ ab.description }}</div>
-              <div v-if="ab.lore" class="ability-lore-wrap">
+              <div v-if="ab.isInnate && ab.description" class="innate-description">
+                <template v-for="(seg, i) in numberSegments(ab.description)" :key="i">
+                  <span v-if="seg.num" class="innate-number">{{ seg.text }}</span>
+                  <template v-else>{{ seg.text }}</template>
+                </template>
+              </div>
+              <div v-if="ab.lore && (!ab.isInnate || ab.lore !== ab.description)" class="ability-lore-wrap">
                 <LoreText :lore="ab.lore" :hero-id="hero.id" />
               </div>
               <div v-if="ab.scepterDescription" class="upgrade-section scepter-section">
@@ -917,9 +941,14 @@ a.affiliation-badge:hover {
 
 .innate-description {
   font-size: 0.82rem;
-  color: var(--color-text);
+  color: var(--color-text-muted);
   line-height: 1.55;
   margin-bottom: 8px;
+}
+
+.innate-number {
+  color: #d4a855;
+  font-weight: 600;
 }
 
 .talent-tree {
@@ -961,11 +990,11 @@ a.affiliation-badge:hover {
 }
 
 .ability-scepter-granted {
-  border-color: #a78bfa55;
+  border-color: #34bfff55;
 }
 
 .ability-shard-granted {
-  border-color: #34d39955;
+  border-color: #c084fc55;
 }
 
 .ability-upgrades {
@@ -999,11 +1028,11 @@ a.affiliation-badge:hover {
 }
 
 .scepter-label {
-  color: #c084fc;
+  color: #34bfff;
 }
 
 .shard-label {
-  color: #34d399;
+  color: #c084fc;
 }
 
 .upgrade-description {

@@ -88,7 +88,7 @@ function mapHero(apiHero, abilityLoreMap, talentMap) {
 
   const abilities = sortedSlots
     .map(({ abilityId }) => abilityLoreMap.get(abilityId))
-    .filter(a => a && !a.isInnate)
+    .filter(Boolean)
     .sort((a, b) => (b.isInnate ? 1 : 0) - (a.isInnate ? 1 : 0))
 
   const talents = sortedSlots
@@ -134,6 +134,7 @@ async function loadHeroes() {
   try {
     const data = await fetchStratzHeroes()
 
+
     const ABILITY_IMG = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/abilities'
     const abilityLoreMap = new Map()
     const talentMap = new Map()
@@ -143,9 +144,18 @@ async function loadHeroes() {
         if (displayName) talentMap.set(ab.id, { id: ab.id, name: ab.name, displayName })
         continue
       }
-      const isInnate = ab.stat?.isInnate || false
+      const isInnate           = ab.stat?.isInnate           || false
+      const isOnLearnbar       = ab.stat?.isOnLearnbar       || false
       const isGrantedByScepter = ab.stat?.isGrantedByScepter || false
       const isGrantedByShard   = ab.stat?.isGrantedByShard   || false
+      if (!isOnLearnbar && !isInnate && !isGrantedByScepter && !isGrantedByShard) continue
+      if (!ab.language?.displayName) continue
+      if (ab.name?.includes('generic_hidden') || ab.name?.includes('_application')) continue
+      if (ab.language?.displayName?.trimEnd().endsWith(':')) continue
+      const rawDesc = Array.isArray(ab.language?.description)
+        ? ab.language.description.join('\n')
+        : (ab.language?.description || '')
+      if (/^[A-Z][A-Z\s]+:/.test(rawDesc.trim())) continue
       const hasScepter = ab.stat?.hasScepterUpgrade || isGrantedByScepter
       const hasShard   = ab.stat?.hasShardUpgrade   || isGrantedByShard
       const lore               = cleanLore(ab.language?.lore)
@@ -153,7 +163,6 @@ async function loadHeroes() {
       const scepterDescription = cleanLore(ab.language?.aghanimDescription) || null
       const shardDescription   = cleanLore(ab.language?.shardDescription)   || null
       const effectiveLore = lore || description
-      if (!ab.language?.displayName) continue
       abilityLoreMap.set(ab.id, {
         id: ab.id,
         name: ab.name,
