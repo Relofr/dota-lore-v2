@@ -19,16 +19,23 @@ const videoReady = ref(false)
 const { speaking, paused, loading: ttsLoading, supported, toggle: toggleSpeech, stop: stopSpeech } = useSpeech()
 watch(() => route.params.id, () => { videoReady.value = false; stopSpeech() })
 
-const searchOpen  = ref(false)
-const searchQuery = ref('')
+const searchOpen    = ref(false)
+const searchQuery   = ref('')
+const debouncedQuery = ref('')
+let searchTimer = null
+watch(searchQuery, val => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { debouncedQuery.value = val }, 300)
+})
 const searchInput = ref(null)
 
 const searchResults = computed(() => {
-  const q = searchQuery.value.toLowerCase().trim()
+  const q = debouncedQuery.value.trim().toLowerCase()
   if (!q) return []
   return heroes.value
     .filter(h => h.id !== route.params.id && (
-      h.name.toLowerCase().includes(q) ||
+      h.initials === q ||
+      h.name?.toLowerCase().includes(q) ||
       (h.realName && h.realName.toLowerCase().includes(q)) ||
       (h.affiliation && h.affiliation.toLowerCase().includes(q))
     ))
@@ -64,6 +71,8 @@ function openSearch() {
 function closeSearch() {
   searchOpen.value = false
   searchQuery.value = ''
+  debouncedQuery.value = ''
+  clearTimeout(searchTimer)
 }
 
 function goToResult(hero) {
@@ -167,6 +176,22 @@ const factionHeroes = computed(() => {
   return heroes.value.filter(
     h => h.id !== hero.value.id && h.factionId === hero.value.factionId && !loreIds.has(h.id)
   )
+})
+
+const SCEPTER_ICON = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/items/ultimate_scepter.png'
+const SHARD_ICON   = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/items/aghanims_shard.png'
+const INNATE_ICON  = 'https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/innate_icon.png'
+const TALENTS_ICON = 'https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/talents.svg'
+
+const TALENT_LEVELS = [10, 15, 20, 25]
+
+const talentPairs = computed(() => {
+  const t = hero.value?.talents || []
+  const pairs = []
+  for (let i = 0; i < t.length; i += 2) {
+    pairs.push([t[i], t[i + 1]].filter(Boolean))
+  }
+  return pairs
 })
 
 const attributeColors = {
@@ -336,14 +361,77 @@ function fmt(n, decimals = 0) {
         <div v-if="hero.abilities && hero.abilities.length" class="abilities-section">
           <h2>Abilities</h2>
           <div class="ability-list">
-            <div v-for="ab in hero.abilities" :key="ab.id" class="ability-item">
+            <div
+              v-for="ab in hero.abilities"
+              :key="ab.id"
+              class="ability-item"
+              :class="{
+                'ability-innate':          ab.isInnate,
+                'ability-scepter-granted': ab.hasScepter,
+                'ability-shard-granted':   ab.hasShard,
+              }"
+            >
               <div class="ability-header">
-                <img class="ability-icon" :src="ab.iconUrl" :alt="ab.displayName" />
+                <img
+                  class="ability-icon"
+                  :class="{ 'innate-ability-icon': ab.isInnate }"
+                  :src="ab.isInnate ? INNATE_ICON : ab.iconUrl"
+                  :alt="ab.displayName"
+                />
                 <h3 class="ability-name">{{ ab.displayName }}</h3>
+                <div v-if="ab.hasScepter || ab.hasShard" class="ability-upgrades">
+                  <img
+                    v-if="ab.hasScepter"
+                    class="upgrade-badge"
+                    :src="SCEPTER_ICON"
+                    alt="Aghanim's Scepter"
+                    :title="ab.isGrantedByScepter ? 'Granted by Aghanim\'s Scepter' : 'Aghanim\'s Scepter upgrade'"
+                  />
+                  <img
+                    v-if="ab.hasShard"
+                    class="upgrade-badge"
+                    :src="SHARD_ICON"
+                    alt="Aghanim's Shard"
+                    :title="ab.isGrantedByShard ? 'Granted by Aghanim\'s Shard' : 'Aghanim\'s Shard upgrade'"
+                  />
+                </div>
               </div>
-              <div class="ability-lore-wrap">
+              <div v-if="ab.isInnate && ab.description" class="innate-description">{{ ab.description }}</div>
+              <div v-if="ab.lore" class="ability-lore-wrap">
                 <LoreText :lore="ab.lore" :hero-id="hero.id" />
               </div>
+              <div v-if="ab.scepterDescription" class="upgrade-section scepter-section">
+                <div class="upgrade-header">
+                  <img class="upgrade-icon" :src="SCEPTER_ICON" alt="Aghanim's Scepter" />
+                  <span class="upgrade-label scepter-label">Aghanim's Scepter</span>
+                </div>
+                <p class="upgrade-description">{{ ab.scepterDescription }}</p>
+              </div>
+              <div v-if="ab.shardDescription" class="upgrade-section shard-section">
+                <div class="upgrade-header">
+                  <img class="upgrade-icon" :src="SHARD_ICON" alt="Aghanim's Shard" />
+                  <span class="upgrade-label shard-label">Aghanim's Shard</span>
+                </div>
+                <p class="upgrade-description">{{ ab.shardDescription }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="talentPairs.length" class="abilities-section talents-section">
+          <h2>
+            <img :src="TALENTS_ICON" class="section-heading-icon" alt="" />
+            Talents
+          </h2>
+          <div class="talent-tree">
+            <div
+              v-for="(pair, i) in [...talentPairs].reverse()"
+              :key="i"
+              class="talent-row"
+            >
+              <span class="talent-option talent-left">{{ pair[0]?.displayName }}</span>
+              <span class="talent-level-badge">{{ TALENT_LEVELS[talentPairs.length - 1 - i] }}</span>
+              <span class="talent-option talent-right">{{ pair[1]?.displayName }}</span>
             </div>
           </div>
         </div>
@@ -774,6 +862,9 @@ a.affiliation-badge:hover {
 .lore-section h2,
 .related-section h2,
 .abilities-section h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.8rem;
   font-weight: 600;
   margin: 0 0 var(--spacing-md);
@@ -825,6 +916,142 @@ a.affiliation-badge:hover {
   margin: 0;
   color: var(--color-text);
   font-family: "Reaver Bold";
+}
+
+.section-heading-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.ability-innate {
+  border-color: #d4a85555;
+}
+
+.innate-ability-icon {
+  object-fit: contain;
+  background: transparent;
+  filter: brightness(0.9);
+}
+
+.innate-description {
+  font-size: 0.82rem;
+  color: var(--color-text);
+  line-height: 1.55;
+  margin-bottom: 8px;
+}
+
+.talent-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.talent-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.talent-option {
+  font-size: 0.82rem;
+  color: var(--color-text);
+  padding: 8px 12px;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  line-height: 1.4;
+}
+
+.talent-left  { text-align: right; }
+.talent-right { text-align: left; }
+
+.talent-level-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  background: var(--color-tag-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ability-scepter-granted {
+  border-color: #a78bfa55;
+}
+
+.ability-shard-granted {
+  border-color: #34d39955;
+}
+
+.ability-upgrades {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.upgrade-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+  opacity: 0.75;
+  transition: opacity 0.15s;
+}
+
+.upgrade-badge:hover {
+  opacity: 1;
+}
+
+.upgrade-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.upgrade-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.upgrade-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: cover;
+  opacity: 0.9;
+}
+
+.upgrade-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.scepter-label {
+  color: #c084fc;
+}
+
+.shard-label {
+  color: #34d399;
+}
+
+.upgrade-description {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  line-height: 1.55;
+  margin: 0;
+  font-style: italic;
 }
 
 .ability-lore-wrap :deep(.lore-text) {

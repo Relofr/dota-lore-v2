@@ -41,11 +41,22 @@ const HEROES_QUERY = `{
       isTalent
       language {
         displayName
+        description
         lore
+        aghanimDescription
+        shardDescription
+      }
+      stat {
+        hasScepterUpgrade
+        isGrantedByScepter
+        hasShardUpgrade
+        isGrantedByShard
+        isInnate
       }
     }
   }
 }`
+
 
 export async function fetchStratzHeroes() {
   const token = import.meta.env.VITE_STRATZ_TOKEN

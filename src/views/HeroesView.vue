@@ -27,6 +27,12 @@ const router = useRouter();
 const { heroes, loading, error } = useHeroes();
 
 const searchQuery = ref(route.query.q || "");
+const debouncedQuery = ref(searchQuery.value)
+let searchTimer = null
+watch(searchQuery, val => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { debouncedQuery.value = val }, 300)
+})
 const selectedAttributes = ref(
   route.query.attr ? [].concat(route.query.attr) : [],
 );
@@ -67,19 +73,24 @@ const allFactions = computed(() => {
 });
 
 const filteredHeroes = computed(() => {
+  const q = debouncedQuery.value.trim().toLowerCase()
+  const wordRe = q
+    ? new RegExp(`\\b${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+    : null
+
   return heroes.value.filter((hero) => {
-    const q = searchQuery.value.toLowerCase();
     const matchesSearch =
       !q ||
-      hero.name.toLowerCase().includes(q) ||
+      hero.initials === q ||
+      hero.name?.toLowerCase().includes(q) ||
       (hero.realName && hero.realName.toLowerCase().includes(q)) ||
       (hero.affiliation && hero.affiliation.toLowerCase().includes(q)) ||
-      (hero.lore && hero.lore.toLowerCase().includes(q)) ||
-      hero.abilities.some(
+      (wordRe && hero.lore && wordRe.test(hero.lore)) ||
+      (wordRe && hero.abilities.some(
         (a) =>
-          a.displayName.toLowerCase().includes(q) ||
-          a.lore.toLowerCase().includes(q),
-      );
+          (a.displayName && wordRe.test(a.displayName)) ||
+          (a.lore && wordRe.test(a.lore)),
+      ));
 
     const matchesAttribute =
       selectedAttributes.value.length === 0 ||

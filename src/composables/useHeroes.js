@@ -30,6 +30,8 @@ let fetchStarted = false
 
 function cleanLore(raw) {
   if (!raw) return ''
+  if (Array.isArray(raw)) raw = raw.join('\n')
+  else if (typeof raw !== 'string') raw = String(raw)
   return raw
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
@@ -53,6 +55,7 @@ function pickAlias(aliases, displayName) {
   if (!aliases?.length) return null
   const excluded = displayName?.toLowerCase()
   const candidates = aliases.filter(a => {
+    if (!a || typeof a !== 'string') return false
     if (excluded && a.toLowerCase() === excluded) return false
     return a.length > 2 || (/[a-z]/.test(a) && /[A-Z]/.test(a))
   })
@@ -61,11 +64,16 @@ function pickAlias(aliases, displayName) {
   return formatAlias(longest)
 }
 
+function heroInitials(name) {
+  if (!name) return ''
+  return name.split(/[\s-]+/).map(w => w[0]?.toLowerCase()).filter(Boolean).join('')
+}
+
 function isSubstantial(str, minLen = 30) {
   return typeof str === 'string' && str.length >= minLen
 }
 
-function mapHero(apiHero, abilityLoreMap) {
+function mapHero(apiHero, abilityLoreMap, talentMap) {
   const key = apiHero.shortName || apiHero.name.replace('npc_dota_hero_', '')
   const loreData = heroLore[key] || {}
   if (!heroLore[key]) {
@@ -76,10 +84,16 @@ function mapHero(apiHero, abilityLoreMap) {
     .map(r => ROLE_MAP[r.roleId])
     .filter(Boolean)
 
-  const abilities = (apiHero.abilities || [])
-    .sort((a, b) => a.slot - b.slot)
+  const sortedSlots = (apiHero.abilities || []).sort((a, b) => a.slot - b.slot)
+
+  const abilities = sortedSlots
     .map(({ abilityId }) => abilityLoreMap.get(abilityId))
-    .filter(a => a && a.lore)
+    .filter(a => a && (a.isInnate || a.lore || a.scepterDescription || a.shardDescription))
+    .sort((a, b) => (b.isInnate ? 1 : 0) - (a.isInnate ? 1 : 0))
+
+  const talents = sortedSlots
+    .map(({ slot, abilityId }) => ({ slot, ...talentMap.get(abilityId) }))
+    .filter(t => t.id)
 
   const apiLore = cleanLore(apiHero.language?.lore)
   const apiHype = cleanLore(apiHero.language?.hype)
@@ -108,6 +122,8 @@ function mapHero(apiHero, abilityLoreMap) {
     lore: isSubstantial(apiLore) ? apiLore : (loreData.lore || apiLore || ''),
     shortLore: isSubstantial(apiHype, 20) ? apiHype : (loreData.shortLore || apiHype || ''),
     abilities,
+    talents,
+    initials: heroInitials(apiHero.displayName),
     imageUrl: `${IMG_BASE}/${key}.png`,
     iconUrl: `${IMG_BASE}/icons/${key}.png`,
   }
@@ -120,22 +136,44 @@ async function loadHeroes() {
 
     const ABILITY_IMG = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/abilities'
     const abilityLoreMap = new Map()
+    const talentMap = new Map()
     for (const ab of data.abilities || []) {
-      if (ab.isTalent) continue
-      const lore = cleanLore(ab.language?.lore)
-      if (!lore) continue
+      if (ab.isTalent) {
+        const displayName = ab.language?.displayName
+        if (displayName) talentMap.set(ab.id, { id: ab.id, name: ab.name, displayName })
+        continue
+      }
+      const isInnate = ab.stat?.isInnate || false
+      const isGrantedByScepter = ab.stat?.isGrantedByScepter || false
+      const isGrantedByShard   = ab.stat?.isGrantedByShard   || false
+      const hasScepter = ab.stat?.hasScepterUpgrade || isGrantedByScepter
+      const hasShard   = ab.stat?.hasShardUpgrade   || isGrantedByShard
+      const lore               = cleanLore(ab.language?.lore)
+      const description        = cleanLore(ab.language?.description) || null
+      const scepterDescription = cleanLore(ab.language?.aghanimDescription) || null
+      const shardDescription   = cleanLore(ab.language?.shardDescription)   || null
+      const effectiveLore = lore || ((isGrantedByScepter || isGrantedByShard) ? description : null)
+      if (!effectiveLore && !scepterDescription && !shardDescription && !isInnate) continue
       abilityLoreMap.set(ab.id, {
         id: ab.id,
         name: ab.name,
         displayName: ab.language?.displayName || ab.name,
         iconUrl: `${ABILITY_IMG}/${ab.name}.png`,
-        lore,
+        lore: effectiveLore,
+        description,
+        scepterDescription,
+        shardDescription,
+        hasScepter,
+        hasShard,
+        isGrantedByScepter,
+        isGrantedByShard,
+        isInnate,
       })
     }
 
     heroes.value = data.heroes
       .filter(h => h.displayName && h.shortName)
-      .map(h => mapHero(h, abilityLoreMap))
+      .map(h => mapHero(h, abilityLoreMap, talentMap))
       .sort((a, b) => a.name.localeCompare(b.name))
   } catch (err) {
     error.value = err.message
