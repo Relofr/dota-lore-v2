@@ -1668,7 +1668,7 @@ a.affiliation-badge:hover {
   font-family: inherit;
   font-weight: 600;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: 998px;
   background: var(--color-accent);
   color: #000;
   border: 1px solid var(--color-border);
