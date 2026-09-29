@@ -6,184 +6,263 @@ import { useSpeech } from "@/composables/useSpeech.js";
 import LoreText from "@/components/LoreText.vue";
 import UpgradeBadge from "@/components/UpgradeBadge.vue";
 
-import meleeIcon   from "@/assets/images/melee.svg";
-import rangedIcon  from "@/assets/images/ranged.svg";
-import attackIcon  from "@/assets/images/attack.svg";
-import defenseIcon from "@/assets/images/defense.svg";
-import mobilityIcon from "@/assets/images/mobility.svg";
-
 const route = useRoute();
 const router = useRouter();
 const { heroes, loading } = useHeroes();
 
-const videoReady = ref(false)
-const { speaking, paused, loading: ttsLoading, supported, toggle: toggleSpeech, stop: stopSpeech } = useSpeech()
-watch(() => route.params.id, () => { videoReady.value = false; stopSpeech() })
+const videoReady = ref(false);
+const {
+  speaking,
+  paused,
+  loading: ttsLoading,
+  supported,
+  toggle: toggleSpeech,
+  stop: stopSpeech,
+} = useSpeech();
+watch(
+  () => route.params.id,
+  () => {
+    videoReady.value = false;
+    stopSpeech();
+  },
+);
 
-const searchOpen  = ref(false)
-const searchQuery = ref('')
-const searchInput = ref(null)
+const searchOpen = ref(false);
+const searchQuery = ref("");
+const searchInput = ref(null);
 
 const searchResults = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return []
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return [];
   return heroes.value
-    .filter(h => h.id !== route.params.id && (
-      h.initials === q ||
-      h.name?.toLowerCase().includes(q) ||
-      (h.realName && h.realName.toLowerCase().includes(q)) ||
-      (h.affiliation && h.affiliation.toLowerCase().includes(q))
-    ))
-    .map(h => {
-      const nameMatch        = h.name.toLowerCase().includes(q)
-      const realNameMatch    = h.realName && h.realName.toLowerCase().includes(q)
-      const affiliationMatch = h.affiliation && h.affiliation.toLowerCase().includes(q)
-      const priority         = nameMatch ? 0 : realNameMatch ? 1 : 2
-      const matchedAffiliation = affiliationMatch && !nameMatch && !realNameMatch
-      return { hero: h, matchedAffiliation, priority }
+    .filter(
+      (h) =>
+        h.id !== route.params.id &&
+        (h.initials === q ||
+          h.name?.toLowerCase().includes(q) ||
+          (h.realName && h.realName.toLowerCase().includes(q)) ||
+          (h.affiliation && h.affiliation.toLowerCase().includes(q))),
+    )
+    .map((h) => {
+      const nameMatch = h.name.toLowerCase().includes(q);
+      const realNameMatch = h.realName && h.realName.toLowerCase().includes(q);
+      const affiliationMatch =
+        h.affiliation && h.affiliation.toLowerCase().includes(q);
+      const priority = nameMatch ? 0 : realNameMatch ? 1 : 2;
+      const matchedAffiliation =
+        affiliationMatch && !nameMatch && !realNameMatch;
+      return { hero: h, matchedAffiliation, priority };
     })
     .sort((a, b) => a.priority - b.priority)
-    .slice(0, 6)
-})
+    .slice(0, 6);
+});
 
 function highlight(text, q) {
-  if (!text || !q) return [{ text, match: false }]
-  const idx = text.toLowerCase().indexOf(q.toLowerCase())
-  if (idx === -1) return [{ text, match: false }]
+  if (!text || !q) return [{ text, match: false }];
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return [{ text, match: false }];
   return [
     { text: text.slice(0, idx), match: false },
     { text: text.slice(idx, idx + q.length), match: true },
     { text: text.slice(idx + q.length), match: false },
-  ].filter(s => s.text)
+  ].filter((s) => s.text);
 }
 
 function openSearch() {
-  searchOpen.value = true
-  searchQuery.value = ''
-  setTimeout(() => searchInput.value?.focus(), 50)
+  searchOpen.value = true;
+  searchQuery.value = "";
+  setTimeout(() => searchInput.value?.focus(), 50);
 }
 
 function closeSearch() {
-  searchOpen.value = false
-  searchQuery.value = ''
+  searchOpen.value = false;
+  searchQuery.value = "";
 }
 
 function goToResult(hero) {
-  router.push(`/heroes/${hero.id}`)
-  closeSearch()
+  router.push(`/heroes/${hero.id}`);
+  closeSearch();
 }
 
 function onSearchKeydown(e) {
-  if (e.key === 'Enter' && searchResults.value.length) {
-    goToResult(searchResults.value[0].hero)
-  } else if (e.key === 'Escape') {
-    closeSearch()
+  if (e.key === "Enter" && searchResults.value.length) {
+    goToResult(searchResults.value[0].hero);
+  } else if (e.key === "Escape") {
+    closeSearch();
   }
 }
 
 function onGlobalKeydown(e) {
-  if (searchOpen.value || e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return
+  if (
+    searchOpen.value ||
+    e.target.tagName === "INPUT" ||
+    e.metaKey ||
+    e.ctrlKey ||
+    e.altKey
+  )
+    return;
   if (e.key.length === 1) {
-    e.preventDefault()
-    searchQuery.value = e.key
-    searchOpen.value = true
-    setTimeout(() => searchInput.value?.focus(), 50)
+    e.preventDefault();
+    searchQuery.value = e.key;
+    searchOpen.value = true;
+    setTimeout(() => searchInput.value?.focus(), 50);
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
+onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
+onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
 
 function goToRandom() {
-  const others = heroes.value.filter(h => h.id !== route.params.id)
-  if (!others.length) return
-  const pick = others[Math.floor(Math.random() * others.length)]
-  router.push(`/heroes/${pick.id}`)
+  const others = heroes.value.filter((h) => h.id !== route.params.id);
+  if (!others.length) return;
+  const pick = others[Math.floor(Math.random() * others.length)];
+  router.push(`/heroes/${pick.id}`);
 }
 
 const hero = computed(
   () => heroes.value.find((h) => h.id === route.params.id) || null,
 );
 
-const heroIndex = computed(() => heroes.value.findIndex(h => h.id === route.params.id))
-const prevHero = computed(() => heroIndex.value > 0 ? heroes.value[heroIndex.value - 1] : heroes.value[heroes.value.length - 1])
-const nextHero = computed(() => heroIndex.value < heroes.value.length - 1 ? heroes.value[heroIndex.value + 1] : heroes.value[0])
+const heroIndex = computed(() =>
+  heroes.value.findIndex((h) => h.id === route.params.id),
+);
+const prevHero = computed(() =>
+  heroIndex.value > 0
+    ? heroes.value[heroIndex.value - 1]
+    : heroes.value[heroes.value.length - 1],
+);
+const nextHero = computed(() =>
+  heroIndex.value < heroes.value.length - 1
+    ? heroes.value[heroIndex.value + 1]
+    : heroes.value[0],
+);
 
-const ESCAPE_RE = /[.*+?^${}()|[\]\\]/g
+const ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
 
 function getExcerpt(loreText, name) {
-  const re = new RegExp(`\\b${name.replace(ESCAPE_RE, '\\$&')}\\b`)
-  const flat = loreText.replace(/\n/g, ' ')
-  const match = re.exec(flat)
-  if (!match) return null
+  const re = new RegExp(`\\b${name.replace(ESCAPE_RE, "\\$&")}\\b`);
+  const flat = loreText.replace(/\n/g, " ");
+  const match = re.exec(flat);
+  if (!match) return null;
 
-  const idx = match.index
-  const half = 80
-  const start = Math.max(0, idx - half)
-  const end = Math.min(flat.length, idx + match[0].length + half)
+  const idx = match.index;
+  const half = 80;
+  const start = Math.max(0, idx - half);
+  const end = Math.min(flat.length, idx + match[0].length + half);
 
-  const before = (start > 0 ? '…' : '') + flat.slice(start, idx)
-  const after  = flat.slice(idx + match[0].length, end) + (end < flat.length ? '…' : '')
+  const before = (start > 0 ? "…" : "") + flat.slice(start, idx);
+  const after =
+    flat.slice(idx + match[0].length, end) + (end < flat.length ? "…" : "");
 
-  return { before, match: match[0], after }
+  return { before, match: match[0], after };
 }
 
 const relatedHeroes = computed(() => {
-  if (!hero.value) return []
-  const results = []
-  const loreText = hero.value.lore || ''
+  if (!hero.value) return [];
+  const results = [];
+  const loreText = hero.value.lore || "";
 
-  const currentNames = [hero.value.name]
+  const currentNames = [hero.value.name];
   if (hero.value.realName && hero.value.realName !== hero.value.name)
-    currentNames.push(hero.value.realName)
+    currentNames.push(hero.value.realName);
 
   for (const other of heroes.value) {
-    if (other.id === hero.value.id) continue
+    if (other.id === hero.value.id) continue;
 
-    const otherNames = [other.name]
-    if (other.realName && other.realName !== other.name) otherNames.push(other.realName)
+    const otherNames = [other.name];
+    if (other.realName && other.realName !== other.name)
+      otherNames.push(other.realName);
 
-    const forwardMatch = otherNames.find(n =>
-      new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`).test(loreText)
-    )
+    const forwardMatch = otherNames.find((n) =>
+      new RegExp(`\\b${n.replace(ESCAPE_RE, "\\$&")}\\b`).test(loreText),
+    );
     if (forwardMatch) {
-      results.push({ hero: other, excerpt: getExcerpt(loreText, forwardMatch) })
-      continue
+      results.push({
+        hero: other,
+        excerpt: getExcerpt(loreText, forwardMatch),
+      });
+      continue;
     }
 
-    const otherLore = other.lore || ''
-    const reverseMatch = currentNames.find(n =>
-      new RegExp(`\\b${n.replace(ESCAPE_RE, '\\$&')}\\b`).test(otherLore)
-    )
+    const otherLore = other.lore || "";
+    const reverseMatch = currentNames.find((n) =>
+      new RegExp(`\\b${n.replace(ESCAPE_RE, "\\$&")}\\b`).test(otherLore),
+    );
     if (reverseMatch) {
-      results.push({ hero: other, excerpt: getExcerpt(otherLore, reverseMatch) })
+      results.push({
+        hero: other,
+        excerpt: getExcerpt(otherLore, reverseMatch),
+      });
     }
   }
 
-  return results
-})
+  return results;
+});
 
 const factionHeroes = computed(() => {
-  if (!hero.value?.factionId) return []
-  const loreIds = new Set(relatedHeroes.value.map(r => r.hero.id))
+  if (!hero.value?.factionId) return [];
+  const loreIds = new Set(relatedHeroes.value.map((r) => r.hero.id));
   return heroes.value.filter(
-    h => h.id !== hero.value.id && h.factionId === hero.value.factionId && !loreIds.has(h.id)
-  )
-})
+    (h) =>
+      h.id !== hero.value.id &&
+      h.factionId === hero.value.factionId &&
+      !loreIds.has(h.id),
+  );
+});
 
-const INNATE_ICON  = 'https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/innate_icon.png'
-const TALENTS_ICON = 'https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/talents.svg'
+const INNATE_ICON =
+  "https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/innate_icon.png";
 
-const TALENT_LEVELS = [10, 15, 20, 25]
+const STAT_ICONS = {
+  damage:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_damage.png",
+  range:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_attack_range.png",
+  attackTime:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_attack_time.png",
+  armor:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_armor.png",
+  magicResist:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_magic_resist.png",
+  moveSpeed:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_movement_speed.png",
+  turnRate:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_turn_rate.png",
+  vision:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_vision.png",
+  projectileSpeed:
+    "https://cdn.steamstatic.com/apps/dota2/images/dota_react//heroes/stats/icon_projectile_speed.png",
+};
+const TALENTS_ICON =
+  "https://cdn.steamstatic.com/apps/dota2/images/dota_react/icons/talents.svg";
+
+const TALENT_LEVELS = [10, 15, 20, 25];
+
+const statsOpen = ref(false);
+
+const heroHealth = computed(() => {
+  if (!hero.value) return { base: 0, regen: 0 };
+  return {
+    base: Math.round(120 + hero.value.stats.strengthBase * 22),
+    regen: +hero.value.stats.hpRegen.toFixed(1),
+  };
+});
+const heroMana = computed(() => {
+  if (!hero.value) return { base: 0, regen: 0 };
+  return {
+    base: Math.round(75 + hero.value.stats.intelligenceBase * 12),
+    regen: +hero.value.stats.mpRegen.toFixed(1),
+  };
+});
 
 const talentPairs = computed(() => {
-  const t = hero.value?.talents || []
-  const pairs = []
+  const t = hero.value?.talents || [];
+  const pairs = [];
   for (let i = 0; i < t.length; i += 2) {
-    pairs.push([t[i], t[i + 1]].filter(Boolean))
+    pairs.push([t[i], t[i + 1]].filter(Boolean));
   }
-  return pairs
-})
+  return pairs;
+});
 
 const attributeColors = {
   strength: "#c83c3c",
@@ -193,30 +272,35 @@ const attributeColors = {
 };
 
 const attributeIcons = {
-  strength:     'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png',
-  agility:      'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png',
-  intelligence: 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_intelligence.png',
-  universal:    'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png',
+  strength:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_strength.png",
+  agility:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_agility.png",
+  intelligence:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_intelligence.png",
+  universal:
+    "https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/icons/hero_universal.png",
 };
 
 function numberSegments(text) {
-  if (!text) return []
-  const parts = []
-  const re = /\d+(?:\.\d+)?%?/g
-  let last = 0, m
+  if (!text) return [];
+  const parts = [];
+  const re = /\d+(?:\.\d+)?%?/g;
+  let last = 0,
+    m;
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push({ num: false, text: text.slice(last, m.index) })
-    parts.push({ num: true, text: m[0] })
-    last = re.lastIndex
+    if (m.index > last)
+      parts.push({ num: false, text: text.slice(last, m.index) });
+    parts.push({ num: true, text: m[0] });
+    last = re.lastIndex;
   }
-  if (last < text.length) parts.push({ num: false, text: text.slice(last) })
-  return parts
+  if (last < text.length) parts.push({ num: false, text: text.slice(last) });
+  return parts;
 }
 
 function fmt(n, decimals = 0) {
-  return typeof n === 'number' ? +n.toFixed(decimals) : n
+  return typeof n === "number" ? +n.toFixed(decimals) : n;
 }
-
 </script>
 
 <template>
@@ -237,27 +321,84 @@ function fmt(n, decimals = 0) {
     <div class="top-bar">
       <nav class="breadcrumb">
         <RouterLink to="/heroes">Heroes</RouterLink>
-        <svg xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z"/></svg>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          height="28px"
+          viewBox="0 -960 960 960"
+          width="28px"
+          fill="currentColor"
+        >
+          <path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z" />
+        </svg>
         <span>{{ hero.name }}</span>
         <span class="breadcrumb-divider">·</span>
         <span class="search-hint">
-          <svg xmlns="http://www.w3.org/2000/svg" height="22px" viewBox="0 -960 960 960" width="22px" fill="currentColor"><path d="M160-200q-33 0-56.5-23.5T80-280v-400q0-33 23.5-56.5T160-760h640q33 0 56.5 23.5T880-680v400q0 33-23.5 56.5T800-200H160Zm0-80h640v-400H160v400Zm160-40h320v-80H320v80ZM200-400h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80ZM200-520h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Z"/></svg>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            height="22px"
+            viewBox="0 -960 960 960"
+            width="22px"
+            fill="currentColor"
+          >
+            <path
+              d="M160-200q-33 0-56.5-23.5T80-280v-400q0-33 23.5-56.5T160-760h640q33 0 56.5 23.5T880-680v400q0 33-23.5 56.5T800-200H160Zm0-80h640v-400H160v400Zm160-40h320v-80H320v80ZM200-400h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80ZM200-520h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Zm120 0h80v-80h-80v80Z"
+            />
+          </svg>
           <span>Type to search...</span>
         </span>
       </nav>
     </div>
 
     <div v-if="heroes.length > 1" class="hero-nav">
-      <RouterLink :to="`/heroes/${prevHero.id}`" class="hero-nav-btn hero-nav-prev">
-        <svg class="hero-nav-arrow" xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M560-240 320-480l240-240 56 56-184 184 184 184-56 56Z"/></svg>
-        <img :src="prevHero.iconUrl" :alt="prevHero.name" class="hero-nav-icon" />
+      <RouterLink
+        :to="`/heroes/${prevHero.id}`"
+        class="hero-nav-btn hero-nav-prev"
+      >
+        <svg
+          class="hero-nav-arrow"
+          xmlns="http://www.w3.org/2000/svg"
+          height="28px"
+          viewBox="0 -960 960 960"
+          width="28px"
+          fill="currentColor"
+        >
+          <path d="M560-240 320-480l240-240 56 56-184 184 184 184-56 56Z" />
+        </svg>
+        <img
+          :src="prevHero.iconUrl"
+          :alt="prevHero.name"
+          class="hero-nav-icon"
+        />
       </RouterLink>
       <button class="hero-nav-random" title="Random hero" @click="goToRandom">
-        <svg xmlns="http://www.w3.org/2000/svg" height="32px" viewBox="0 -960 960 960" width="32px" fill="currentColor"><path d="M682.5-277.5Q700-295 700-320t-17.5-42.5Q665-380 640-380t-42.5 17.5Q580-345 580-320t17.5 42.5Q615-260 640-260t42.5-17.5Zm-160-160Q540-455 540-480t-17.5-42.5Q505-540 480-540t-42.5 17.5Q420-505 420-480t17.5 42.5Q455-420 480-420t42.5-17.5Zm-160-160Q380-615 380-640t-17.5-42.5Q345-700 320-700t-42.5 17.5Q260-665 260-640t17.5 42.5Q295-580 320-580t42.5-17.5ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z"/></svg>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          height="32px"
+          viewBox="0 -960 960 960"
+          width="32px"
+          fill="currentColor"
+        >
+          <path
+            d="M682.5-277.5Q700-295 700-320t-17.5-42.5Q665-380 640-380t-42.5 17.5Q580-345 580-320t17.5 42.5Q615-260 640-260t42.5-17.5Zm-160-160Q540-455 540-480t-17.5-42.5Q505-540 480-540t-42.5 17.5Q420-505 420-480t17.5 42.5Q455-420 480-420t42.5-17.5Zm-160-160Q380-615 380-640t-17.5-42.5Q345-700 320-700t-42.5 17.5Q260-665 260-640t17.5 42.5Q295-580 320-580t42.5-17.5ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z"
+          />
+        </svg>
       </button>
       <RouterLink :to="`/heroes/${nextHero.id}`" class="hero-nav-btn">
-        <img :src="nextHero.iconUrl" :alt="nextHero.name" class="hero-nav-icon" />
-        <svg class="hero-nav-arrow" xmlns="http://www.w3.org/2000/svg" height="28px" viewBox="0 -960 960 960" width="28px" fill="currentColor"><path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z"/></svg>
+        <img
+          :src="nextHero.iconUrl"
+          :alt="nextHero.name"
+          class="hero-nav-icon"
+        />
+        <svg
+          class="hero-nav-arrow"
+          xmlns="http://www.w3.org/2000/svg"
+          height="28px"
+          viewBox="0 -960 960 960"
+          width="28px"
+          fill="currentColor"
+        >
+          <path d="M400-240l-56-56 184-184-184-184 56-56 240 240-240 240Z" />
+        </svg>
       </RouterLink>
     </div>
 
@@ -292,10 +433,29 @@ function fmt(n, decimals = 0) {
             v-if="hero.factionId"
             :to="`/heroes?faction=${hero.factionId}`"
             class="affiliation-badge"
-          >{{ hero.affiliation }}</RouterLink>
+            >{{ hero.affiliation }}</RouterLink
+          >
           <span class="meta-divider" />
-          <span v-if="hero.attackType" class="attack-badge">{{ hero.attackType }}</span>
-          <span v-for="role in hero.roles" :key="role" class="role-tag">{{ role }}</span>
+          <button class="view-stats-btn" @click="statsOpen = true">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="14px"
+              viewBox="0 -960 960 960"
+              width="14px"
+              fill="currentColor"
+            >
+              <path
+                d="M120-120v-200h160v200H120Zm200 0v-440h160v440H320Zm200 0v-320h160v320H520Zm200 0v-600h160v600H720Z"
+              />
+            </svg>
+            Stats
+          </button>
+          <span v-if="hero.attackType" class="attack-badge">{{
+            hero.attackType
+          }}</span>
+          <span v-for="role in hero.roles" :key="role" class="role-tag">{{
+            role
+          }}</span>
         </div>
       </div>
     </div>
@@ -316,25 +476,68 @@ function fmt(n, decimals = 0) {
               class="lore-listen-btn"
               :class="{ loading: ttsLoading }"
               :disabled="ttsLoading"
-              :title="ttsLoading ? 'Loading…' : speaking && !paused ? 'Pause' : paused ? 'Resume' : 'Listen'"
+              :title="
+                ttsLoading
+                  ? 'Loading…'
+                  : speaking && !paused
+                    ? 'Pause'
+                    : paused
+                      ? 'Resume'
+                      : 'Listen'
+              "
               @click="toggleSpeech(hero.lore)"
             >
               <!-- Loading spinner -->
-              <svg v-if="ttsLoading" class="spin" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 31.5-155.5t86-127Q252-817 325-848.5T480-880q17 0 28.5 11.5T520-840q0 17-11.5 28.5T480-800q-133 0-226.5 93.5T160-480q0 133 93.5 226.5T480-160q133 0 226.5-93.5T800-480q0-17 11.5-28.5T840-520q17 0 28.5 11.5T880-480q0 82-31.5 155t-86 127.5Q708-143 635-111.5T480-80Z"/></svg>
+              <svg
+                v-if="ttsLoading"
+                class="spin"
+                xmlns="http://www.w3.org/2000/svg"
+                height="20px"
+                viewBox="0 -960 960 960"
+                width="20px"
+                fill="currentColor"
+              >
+                <path
+                  d="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 31.5-155.5t86-127Q252-817 325-848.5T480-880q17 0 28.5 11.5T520-840q0 17-11.5 28.5T480-800q-133 0-226.5 93.5T160-480q0 133 93.5 226.5T480-160q133 0 226.5-93.5T800-480q0-17 11.5-28.5T840-520q17 0 28.5 11.5T880-480q0 82-31.5 155t-86 127.5Q708-143 635-111.5T480-80Z"
+                />
+              </svg>
               <!-- Pause -->
-              <svg v-else-if="speaking && !paused && !ttsLoading" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M520-200v-560h240v560H520Zm-320 0v-560h240v560H200Z"/></svg>
+              <svg
+                v-else-if="speaking && !paused && !ttsLoading"
+                xmlns="http://www.w3.org/2000/svg"
+                height="20px"
+                viewBox="0 -960 960 960"
+                width="20px"
+                fill="currentColor"
+              >
+                <path d="M520-200v-560h240v560H520Zm-320 0v-560h240v560H200Z" />
+              </svg>
               <!-- Play -->
-              <svg v-else xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg>
+              <svg
+                v-else
+                xmlns="http://www.w3.org/2000/svg"
+                height="20px"
+                viewBox="0 -960 960 960"
+                width="20px"
+                fill="currentColor"
+              >
+                <path d="M320-200v-560l440 280-440 280Z" />
+              </svg>
             </button>
           </div>
           <LoreText :lore="hero.lore" :hero-id="hero.id" />
         </div>
         <div v-else class="lore-section lore-empty">
           <h2>Lore</h2>
-          <p class="lore-placeholder">Extended lore for {{ hero.name }} coming soon.</p>
+          <p class="lore-placeholder">
+            Extended lore for {{ hero.name }} coming soon.
+          </p>
         </div>
 
-        <div v-if="relatedHeroes.length || factionHeroes.length" class="related-section">
+        <div
+          v-if="relatedHeroes.length || factionHeroes.length"
+          class="related-section"
+        >
           <h2>Related Heroes</h2>
 
           <template v-if="relatedHeroes.length">
@@ -346,7 +549,11 @@ function fmt(n, decimals = 0) {
                 :to="`/heroes/${rel.hero.id}`"
                 class="related-chip"
               >
-                <img :src="rel.hero.iconUrl" :alt="rel.hero.name" class="related-chip-icon" />
+                <img
+                  :src="rel.hero.iconUrl"
+                  :alt="rel.hero.name"
+                  class="related-chip-icon"
+                />
                 <span class="related-chip-name">{{ rel.hero.name }}</span>
               </RouterLink>
             </div>
@@ -361,14 +568,21 @@ function fmt(n, decimals = 0) {
                 :to="`/heroes/${fh.id}`"
                 class="related-chip"
               >
-                <img :src="fh.iconUrl" :alt="fh.name" class="related-chip-icon" />
+                <img
+                  :src="fh.iconUrl"
+                  :alt="fh.name"
+                  class="related-chip-icon"
+                />
                 <span class="related-chip-name">{{ fh.name }}</span>
               </RouterLink>
             </div>
           </template>
         </div>
 
-        <div v-if="hero.abilities && hero.abilities.length" class="abilities-section">
+        <div
+          v-if="hero.abilities && hero.abilities.length"
+          class="abilities-section"
+        >
           <h2>Abilities</h2>
           <div class="ability-list">
             <div
@@ -376,9 +590,9 @@ function fmt(n, decimals = 0) {
               :key="ab.id"
               class="ability-item"
               :class="{
-                'ability-innate':          ab.isInnate,
+                'ability-innate': ab.isInnate,
                 'ability-scepter-granted': ab.hasScepter,
-                'ability-shard-granted':   ab.hasShard,
+                'ability-shard-granted': ab.hasShard,
               }"
             >
               <div class="ability-header">
@@ -389,28 +603,50 @@ function fmt(n, decimals = 0) {
                   :alt="ab.displayName"
                 />
                 <h3 class="ability-name">{{ ab.displayName }}</h3>
-                <div v-if="ab.hasScepter || ab.hasShard" class="ability-upgrades">
+                <div
+                  v-if="ab.hasScepter || ab.hasShard"
+                  class="ability-upgrades"
+                >
                   <UpgradeBadge v-if="ab.hasScepter" type="scepter" />
-                  <UpgradeBadge v-if="ab.hasShard"   type="shard" />
+                  <UpgradeBadge v-if="ab.hasShard" type="shard" />
                 </div>
               </div>
-              <div v-if="ab.isInnate && ab.description" class="innate-description">
-                <template v-for="(seg, i) in numberSegments(ab.description)" :key="i">
-                  <span v-if="seg.num" class="innate-number">{{ seg.text }}</span>
+              <div
+                v-if="ab.isInnate && ab.description"
+                class="innate-description"
+              >
+                <template
+                  v-for="(seg, i) in numberSegments(ab.description)"
+                  :key="i"
+                >
+                  <span v-if="seg.num" class="innate-number">{{
+                    seg.text
+                  }}</span>
                   <template v-else>{{ seg.text }}</template>
                 </template>
               </div>
-              <div v-if="ab.lore && (!ab.isInnate || ab.lore !== ab.description)" class="ability-lore-wrap">
+              <div
+                v-if="ab.lore && (!ab.isInnate || ab.lore !== ab.description)"
+                class="ability-lore-wrap"
+              >
                 <LoreText :lore="ab.lore" :hero-id="hero.id" />
               </div>
-              <div v-if="ab.scepterDescription" class="upgrade-section scepter-section">
+              <div
+                v-if="ab.scepterDescription"
+                class="upgrade-section scepter-section"
+              >
                 <div class="upgrade-header">
                   <UpgradeBadge type="scepter" />
-                  <span class="upgrade-label scepter-label">Aghanim's Scepter</span>
+                  <span class="upgrade-label scepter-label"
+                    >Aghanim's Scepter</span
+                  >
                 </div>
                 <p class="upgrade-description">{{ ab.scepterDescription }}</p>
               </div>
-              <div v-if="ab.shardDescription" class="upgrade-section shard-section">
+              <div
+                v-if="ab.shardDescription"
+                class="upgrade-section shard-section"
+              >
                 <div class="upgrade-header">
                   <UpgradeBadge type="shard" />
                   <span class="upgrade-label shard-label">Aghanim's Shard</span>
@@ -421,7 +657,10 @@ function fmt(n, decimals = 0) {
           </div>
         </div>
 
-        <div v-if="talentPairs.length" class="abilities-section talents-section">
+        <div
+          v-if="talentPairs.length"
+          class="abilities-section talents-section"
+        >
           <h2>
             <img :src="TALENTS_ICON" class="section-heading-icon" alt="" />
             Talents
@@ -432,19 +671,21 @@ function fmt(n, decimals = 0) {
               :key="i"
               class="talent-row"
             >
-              <span class="talent-option talent-left">{{ pair[0]?.displayName }}</span>
-              <span class="talent-level-badge">{{ TALENT_LEVELS[talentPairs.length - 1 - i] }}</span>
-              <span class="talent-option talent-right">{{ pair[1]?.displayName }}</span>
+              <span class="talent-option talent-left">{{
+                pair[0]?.displayName
+              }}</span>
+              <span class="talent-level-badge">{{
+                TALENT_LEVELS[talentPairs.length - 1 - i]
+              }}</span>
+              <span class="talent-option talent-right">{{
+                pair[1]?.displayName
+              }}</span>
             </div>
           </div>
         </div>
-
       </div>
 
-      <div
-        class="hero-portrait-wrap"
-        :class="`portrait-${hero.id}`"
-      >
+      <div class="hero-portrait-wrap" :class="`portrait-${hero.id}`">
         <img
           v-if="!videoReady"
           :key="`poster-${hero.id}`"
@@ -471,9 +712,179 @@ function fmt(n, decimals = 0) {
       </div>
     </div>
 
+    <!-- Stats modal -->
+    <Transition name="search-fade">
+      <div
+        v-if="statsOpen"
+        class="stats-overlay"
+        @click.self="statsOpen = false"
+      >
+        <div class="stats-panel">
+          <div class="stats-header">
+            <span class="stats-title">Stats</span>
+            <button class="stats-close-btn" @click="statsOpen = false">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                height="20px"
+                viewBox="0 -960 960 960"
+                width="20px"
+                fill="currentColor"
+              >
+                <path
+                  d="M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Attributes -->
+
+          <!-- Attack / Defense / Mobility -->
+          <div class="stats-main">
+            <div class="stats-col">
+              <p class="stats-col-heading">Attributes</p>
+              <div class="stats-attrs">
+                <div class="stat-attr">
+                  <img
+                    :src="attributeIcons.strength"
+                    class="stat-attr-img"
+                    alt="STR"
+                  />
+                  <span class="attr-num attr-str">{{
+                    fmt(hero.stats.strengthBase)
+                  }}</span>
+                  <span class="attr-gain"
+                    >+{{ fmt(hero.stats.strengthGain, 1) }}</span
+                  >
+                </div>
+                <div class="stat-attr">
+                  <img
+                    :src="attributeIcons.agility"
+                    class="stat-attr-img"
+                    alt="AGI"
+                  />
+                  <span class="attr-num attr-agi">{{
+                    fmt(hero.stats.agilityBase)
+                  }}</span>
+                  <span class="attr-gain"
+                    >+{{ fmt(hero.stats.agilityGain, 1) }}</span
+                  >
+                </div>
+                <div class="stat-attr">
+                  <img
+                    :src="attributeIcons.intelligence"
+                    class="stat-attr-img"
+                    alt="INT"
+                  />
+                  <span class="attr-num attr-int">{{
+                    fmt(hero.stats.intelligenceBase)
+                  }}</span>
+                  <span class="attr-gain"
+                    >+{{ fmt(hero.stats.intelligenceGain, 1) }}</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div class="stats-col">
+              <p class="stats-col-heading">Attack</p>
+              <div class="si">
+                <img :src="STAT_ICONS.damage" class="si-icon" alt="" /><span
+                  class="si-val"
+                  >{{ fmt(hero.stats.damageMin) }}–{{
+                    fmt(hero.stats.damageMax)
+                  }}</span
+                >
+              </div>
+              <div class="si">
+                <img :src="STAT_ICONS.attackTime" class="si-icon" alt="" /><span
+                  class="si-val"
+                  >{{ fmt(hero.stats.attackRate, 1) }}</span
+                >
+              </div>
+              <div class="si">
+                <img :src="STAT_ICONS.range" class="si-icon" alt="" /><span
+                  class="si-val"
+                  >{{ fmt(hero.stats.attackRange) }}</span
+                >
+              </div>
+              <div class="si">
+                <img
+                  :src="STAT_ICONS.projectileSpeed"
+                  class="si-icon"
+                  alt=""
+                /><span class="si-val">{{
+                  fmt(hero.stats.projectileSpeed)
+                }}</span>
+              </div>
+            </div>
+
+            <div class="stats-col">
+              <p class="stats-col-heading">Defense</p>
+              <div class="si">
+                <img :src="STAT_ICONS.armor" class="si-icon" alt="" /><span
+                  class="si-val"
+                  >{{ fmt(hero.stats.armor, 1) }}</span
+                >
+              </div>
+              <div class="si">
+                <img
+                  :src="STAT_ICONS.magicResist"
+                  class="si-icon"
+                  alt=""
+                /><span class="si-val"
+                  >{{ fmt(hero.stats.magicResist, 1) }}%</span
+                >
+              </div>
+            </div>
+
+            <div class="stats-col">
+              <p class="stats-col-heading">Mobility</p>
+              <div class="si">
+                <img :src="STAT_ICONS.moveSpeed" class="si-icon" alt="" /><span
+                  class="si-val"
+                  >{{ fmt(hero.stats.moveSpeed) }}</span
+                >
+              </div>
+              <div class="si">
+                <img :src="STAT_ICONS.turnRate" class="si-icon" alt="" /><span
+                  class="si-val"
+                  >{{ fmt(hero.stats.turnRate, 1) }}</span
+                >
+              </div>
+              <div class="si">
+                <img :src="STAT_ICONS.vision" class="si-icon" alt="" /><span
+                  class="si-val"
+                  >{{ fmt(hero.stats.visionDay) }} /
+                  {{ fmt(hero.stats.visionNight) }}</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <!-- Health & Mana bars -->
+          <div class="stats-hm">
+            <div class="hm-bar hm-hp">
+              <span class="hm-base"
+                >{{ heroHealth.base }} +{{ heroHealth.regen }}</span
+              >
+            </div>
+            <div class="hm-bar hm-mp">
+              <span class="hm-base"
+                >{{ heroMana.base }} +{{ heroMana.regen }}</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Floating hero search -->
     <Transition name="search-fade">
-      <div v-if="searchOpen" class="hero-search-overlay" @click.self="closeSearch">
+      <div
+        v-if="searchOpen"
+        class="hero-search-overlay"
+        @click.self="closeSearch"
+      >
         <div class="hero-search-box">
           <input
             ref="searchInput"
@@ -489,17 +900,30 @@ function fmt(n, decimals = 0) {
               class="hero-search-result"
               @click="goToResult(r.hero)"
             >
-              <img :src="r.hero.iconUrl" :alt="r.hero.name" class="hero-search-icon" />
+              <img
+                :src="r.hero.iconUrl"
+                :alt="r.hero.name"
+                class="hero-search-icon"
+              />
               <span class="hero-search-info">
                 <span class="hero-search-name">{{ r.hero.name }}</span>
                 <span v-if="r.matchedAffiliation" class="hero-search-match">
-                  <template v-for="seg in highlight(r.hero.affiliation, searchQuery)" :key="seg.text">
-                    <mark v-if="seg.match" class="hero-search-highlight">{{ seg.text }}</mark>
+                  <template
+                    v-for="seg in highlight(r.hero.affiliation, searchQuery)"
+                    :key="seg.text"
+                  >
+                    <mark v-if="seg.match" class="hero-search-highlight">{{
+                      seg.text
+                    }}</mark>
                     <template v-else>{{ seg.text }}</template>
                   </template>
                 </span>
               </span>
-              <span v-if="r.hero.realName && r.hero.realName !== r.hero.name" class="hero-search-real">{{ r.hero.realName }}</span>
+              <span
+                v-if="r.hero.realName && r.hero.realName !== r.hero.name"
+                class="hero-search-real"
+                >{{ r.hero.realName }}</span
+              >
             </button>
           </div>
         </div>
@@ -609,7 +1033,6 @@ function fmt(n, decimals = 0) {
   align-items: flex-start;
 }
 
-
 .hero-content {
   max-width: 680px;
 }
@@ -654,8 +1077,12 @@ video.hero-portrait-img {
 }
 
 @keyframes portrait-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .portrait-broodmother .hero-portrait-img,
@@ -744,8 +1171,16 @@ video.hero-portrait-img {
 }
 
 .attribute-badge:hover {
-  background: color-mix(in srgb, var(--attr-color) 16%, var(--color-card-bg)) !important;
-  border-color: color-mix(in srgb, var(--attr-color) 60%, transparent) !important;
+  background: color-mix(
+    in srgb,
+    var(--attr-color) 16%,
+    var(--color-card-bg)
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--attr-color) 60%,
+    transparent
+  ) !important;
 }
 
 .attribute-badge-icon {
@@ -789,7 +1224,9 @@ video.hero-portrait-img {
   color: var(--color-accent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
   text-decoration: none;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 a.affiliation-badge:hover {
@@ -859,7 +1296,9 @@ a.affiliation-badge:hover {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .lore-section h2,
@@ -974,8 +1413,12 @@ a.affiliation-badge:hover {
   line-height: 1.4;
 }
 
-.talent-left  { text-align: right; }
-.talent-right { text-align: left; }
+.talent-left {
+  text-align: right;
+}
+.talent-right {
+  text-align: left;
+}
 
 .talent-level-badge {
   font-size: 0.68rem;
@@ -1005,7 +1448,6 @@ a.affiliation-badge:hover {
   flex-shrink: 0;
 }
 
-
 .upgrade-section {
   margin-top: 10px;
   padding-top: 10px;
@@ -1018,7 +1460,6 @@ a.affiliation-badge:hover {
   gap: 6px;
   margin-bottom: 5px;
 }
-
 
 .upgrade-label {
   font-size: 0.68rem;
@@ -1090,7 +1531,9 @@ a.affiliation-badge:hover {
   text-decoration: none;
   color: var(--color-text);
   font-size: 0.78rem;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .related-chip:hover {
@@ -1124,7 +1567,9 @@ a.affiliation-badge:hover {
   border-radius: 999px;
   padding: 8px 16px;
   z-index: 10;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 
 .hero-nav-btn {
@@ -1193,16 +1638,241 @@ a.affiliation-badge:hover {
 }
 
 @keyframes dice-roll {
-  0%   { transform: rotate(0deg) scale(1); }
-  25%  { transform: rotate(-10deg) scale(1.1); }
-  50%  { transform: rotate(10deg) scale(1.1); }
-  75%  { transform: rotate(-5deg) scale(1.1); }
-  100% { transform: rotate(0deg) scale(1); }
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  25% {
+    transform: rotate(-10deg) scale(1.1);
+  }
+  50% {
+    transform: rotate(10deg) scale(1.1);
+  }
+  75% {
+    transform: rotate(-5deg) scale(1.1);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
 }
 
 .hero-nav-arrow {
   flex-shrink: 0;
   display: block;
+}
+
+.view-stats-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #000;
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.view-stats-btn:hover {
+  opacity: 0.85;
+}
+
+/* ── Stats modal ─────────────────────────── */
+.stats-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 20px;
+}
+
+.stats-panel {
+  background: #1a1f28;
+  border: 1px solid #2e3542;
+  border-radius: var(--radius);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.7);
+  width: min(620px, 100%);
+  overflow: hidden;
+}
+
+/* Header */
+.stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #141820;
+  border-bottom: 1px solid #2e3542;
+}
+
+.stats-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text);
+  font-family: "Reaver Bold";
+}
+
+.stats-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  padding: 0;
+  transition: color 0.15s;
+}
+.stats-close-btn:hover {
+  color: var(--color-text);
+}
+
+/* Attributes bar */
+.stats-attrs {
+  /* display: flex;
+  flex-direction: column;
+  height: 100%;
+  align-items: flex-start; */
+}
+
+.stat-attr {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  justify-content: flex-start;
+}
+
+.stat-attr-img {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.attr-num {
+  font-size: 1rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.attr-str {
+  color: #e05555;
+}
+.attr-agi {
+  color: #4ebb65;
+}
+.attr-int {
+  color: #5a80e0;
+}
+
+.attr-gain {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* 3-column stats area */
+.stats-main {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-evenly;
+}
+
+.stats-col {
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.stats-col + .stats-col {
+  border-left: 1px solid #2e3542;
+}
+
+.stats-col-heading {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-muted);
+  margin: 0 0 10px;
+}
+
+/* stat item: icon + value */
+.si {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.si-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.si-val {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Health & Mana footer */
+.stats-hm {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #2e3542;
+}
+
+.hm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  gap: 12px;
+}
+
+.hm-hp {
+  background: linear-gradient(to right, #256834, #4ebb65);
+}
+
+.hm-mp {
+  background: linear-gradient(to right, #2444a0, #3c64c8);
+}
+
+.hm-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
+  flex-shrink: 0;
+  width: 44px;
+}
+
+.hm-base {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+  flex: 1;
+  text-align: center;
+}
+
+.hm-gain {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
+  text-align: right;
+  width: 44px;
 }
 
 /* Floating hero search */
@@ -1262,7 +1932,6 @@ a.affiliation-badge:hover {
   background: color-mix(in srgb, var(--color-accent) 8%, #252b36);
 }
 
-
 .hero-search-icon {
   width: 32px;
   height: 32px;
@@ -1300,7 +1969,6 @@ a.affiliation-badge:hover {
   font-size: 0.78rem;
   font-style: italic;
 }
-
 
 .search-fade-enter-active,
 .search-fade-leave-active {

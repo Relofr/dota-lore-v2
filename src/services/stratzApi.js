@@ -28,7 +28,17 @@ const HEROES_QUERY = `{
         startingArmor
         startingMagicArmor
         hpRegen
+        mpRegen
         moveSpeed
+        moveTurnRate
+        strengthBase
+        strengthGain
+        agilityBase
+        agilityGain
+        intelligenceBase
+        intelligenceGain
+        visionDaytimeRange
+        visionNighttimeRange
       }
       abilities {
         slot
@@ -57,6 +67,7 @@ const HEROES_QUERY = `{
     }
   }
 }`
+
 
 
 export async function fetchStratzHeroes() {
