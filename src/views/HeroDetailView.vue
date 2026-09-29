@@ -1678,6 +1678,7 @@ a.affiliation-badge:hover {
     border-color 0.15s;
 }
 
+
 .view-stats-btn:hover {
   opacity: 0.85;
 }
