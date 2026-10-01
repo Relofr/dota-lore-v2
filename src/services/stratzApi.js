@@ -147,6 +147,18 @@ export async function fetchMatchPlayers(matchId) {
         heroDamage
         lane
         position
+        stats {
+          lastHitsPerMinute
+          deniesPerMinute
+          goldPerMinute
+          experiencePerMinute
+          networthPerMinute
+          heroDamagePerMinute
+          level
+          killEvents { time }
+          deathEvents { time }
+          assistEvents { time }
+        }
         hero {
           displayName
           shortName

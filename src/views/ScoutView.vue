@@ -43,6 +43,46 @@ onMounted(() => {
 const radiantPlayers = computed(() => match.value?.players?.filter(p => p.isRadiant) ?? [])
 const direPlayers = computed(() => match.value?.players?.filter(p => !p.isRadiant) ?? [])
 
+const MAP_LANES = [
+  { key: 'bottom', label: 'Bottom Lane' },
+  { key: 'mid', label: 'Mid Lane' },
+  { key: 'top', label: 'Top Lane' },
+  { key: 'other', label: 'Jungle / Roaming' },
+]
+
+function positionNumber(p) {
+  const m = /POSITION_(\d)/.exec(p.thisMatch?.position ?? '')
+  return m ? Number(m[1]) : 9
+}
+
+function pairUp(radiant, dire) {
+  const rows = []
+  for (let i = 0; i < Math.max(radiant.length, dire.length); i++) {
+    rows.push({ radiant: radiant[i] ?? null, dire: dire[i] ?? null })
+  }
+  return rows
+}
+
+// Rows pair each player with who they laned against; live matches have no lane data, so they fall back to team order.
+const layoutRows = computed(() => {
+  const players = match.value?.players ?? []
+  if (!players.length || !players.every(p => p.thisMatch?.lane)) {
+    return pairUp(radiantPlayers.value, direPlayers.value)
+  }
+  const rows = []
+  for (const lane of MAP_LANES) {
+    const inLane = players.filter(p => (mapLane(p.thisMatch.lane, p.isRadiant) ?? 'other') === lane.key)
+    if (!inLane.length) continue
+    const side = isRadiant => inLane
+      .filter(p => p.isRadiant === isRadiant)
+      .sort((a, b) => positionNumber(a) - positionNumber(b))
+    const laneRows = pairUp(side(true), side(false))
+    laneRows[0].label = lane.label
+    rows.push(...laneRows)
+  }
+  return rows
+})
+
 function topHeroes(accountId) {
   const games = playerData.value[accountId]?.recentPeriod
   if (!games?.length) return []
@@ -102,6 +142,30 @@ function laneResult(p) {
   return {
     label: won ? (stomp ? 'Lane Won · Stomp' : 'Lane Won') : (stomp ? 'Lane Lost · Stomped' : 'Lane Lost'),
     tone: won ? 'win' : 'loss',
+  }
+}
+
+const AT_MINUTE = 10
+
+// Per-minute timelines from Stratz: LH, denies, damage, gold and XP are amounts gained each minute;
+// net worth is a running total starting at minute 0; level lists the second each level was reached.
+function statsAt10(p) {
+  const s = p.thisMatch?.stats
+  if (!s?.networthPerMinute?.length) return null
+  const cutoff = AT_MINUTE * 60
+  const sumFirst = arr => (arr ?? []).slice(0, AT_MINUTE).reduce((a, b) => a + b, 0)
+  const eventsBy = events => (events ?? []).filter(e => e.time <= cutoff).length
+  return {
+    kills: eventsBy(s.killEvents),
+    deaths: eventsBy(s.deathEvents),
+    assists: eventsBy(s.assistEvents),
+    lastHits: sumFirst(s.lastHitsPerMinute),
+    denies: sumFirst(s.deniesPerMinute),
+    gpm: Math.round(sumFirst(s.goldPerMinute) / AT_MINUTE),
+    xpm: Math.round(sumFirst(s.experiencePerMinute) / AT_MINUTE),
+    networth: s.networthPerMinute[Math.min(AT_MINUTE, s.networthPerMinute.length - 1)],
+    heroDamage: sumFirst(s.heroDamagePerMinute),
+    level: (s.level ?? []).filter(t => t <= cutoff).length,
   }
 }
 
@@ -352,19 +416,22 @@ async function loadByMatchId() {
     </div>
 
     <div v-if="match" class="teams">
-      <div v-for="(players, ti) in [radiantPlayers, direPlayers]" :key="ti" class="team">
-        <div class="team-heading">
-          <div class="team-label" :class="ti === 0 ? 'radiant-label' : 'dire-label'">
-            {{ ti === 0 ? 'Radiant' : 'Dire' }}
-          </div>
-          <span
-            v-if="match.didRadiantWin != null"
-            class="team-result"
-            :class="match.didRadiantWin === (ti === 0) ? 'win' : 'loss'"
-          >{{ match.didRadiantWin === (ti === 0) ? 'Victory' : 'Defeat' }}</span>
+      <div v-for="ti in [0, 1]" :key="`heading-${ti}`" class="team-heading">
+        <div class="team-label" :class="ti === 0 ? 'radiant-label' : 'dire-label'">
+          {{ ti === 0 ? 'Radiant' : 'Dire' }}
         </div>
-        <div class="player-list">
-          <div v-for="p in players" :key="p.accountId" class="player-card">
+        <span
+          v-if="match.didRadiantWin != null"
+          class="team-result"
+          :class="match.didRadiantWin === (ti === 0) ? 'win' : 'loss'"
+        >{{ match.didRadiantWin === (ti === 0) ? 'Victory' : 'Defeat' }}</span>
+      </div>
+
+      <template v-for="(row, ri) in layoutRows" :key="`row-${ri}`">
+        <div v-if="row.label" class="lane-row-label">{{ row.label }}</div>
+        <template v-for="(p, side) in [row.radiant, row.dire]" :key="`cell-${ri}-${side}`">
+          <div v-if="!p" class="player-card-spacer" />
+          <div v-else class="player-card" :class="side === 0 ? 'card-radiant' : 'card-dire'">
 
             <!-- Player header -->
             <div class="player-header">
@@ -440,22 +507,43 @@ async function loadByMatchId() {
                   alt=""
                 />
                 <div class="this-match-hero">
-                  <span class="this-match-hero-name">{{ p.thisMatch.hero?.displayName ?? '—' }}</span>
-                  <span class="this-match-sub">
-                    Lvl {{ p.thisMatch.level ?? '—' }}
-                    <template v-if="LANE_NAMES[p.thisMatch.lane]"> · {{ LANE_NAMES[p.thisMatch.lane] }}</template>
+                  <span class="this-match-hero-line">
+                    <span class="this-match-hero-name">{{ p.thisMatch.hero?.displayName ?? '—' }}</span>
+                    <span v-if="laneResult(p)" class="lane-outcome" :class="`lane-${laneResult(p).tone}`">
+                      {{ laneResult(p).label }}
+                    </span>
                   </span>
+                  <span v-if="LANE_NAMES[p.thisMatch.lane]" class="this-match-sub">{{ LANE_NAMES[p.thisMatch.lane] }}</span>
                 </div>
               </div>
-              <div class="this-match-stats">
-                <div class="stat"><span class="stat-val">{{ p.thisMatch.kills }}/{{ p.thisMatch.deaths }}/{{ p.thisMatch.assists }}</span><span class="stat-label">KDA</span></div>
-                <div class="stat"><span class="stat-val">{{ p.thisMatch.numLastHits }}/{{ p.thisMatch.numDenies }}</span><span class="stat-label">LH/DN</span></div>
-                <div class="stat"><span class="stat-val">{{ p.thisMatch.goldPerMinute }}/{{ p.thisMatch.experiencePerMinute }}</span><span class="stat-label">GPM/XPM</span></div>
-                <div class="stat"><span class="stat-val">{{ compact(p.thisMatch.networth) }}</span><span class="stat-label">Net Worth</span></div>
-                <div class="stat"><span class="stat-val">{{ compact(p.thisMatch.heroDamage) }}</span><span class="stat-label">Hero Dmg</span></div>
-              </div>
-              <div v-if="laneResult(p)" class="lane-outcome" :class="`lane-${laneResult(p).tone}`">
-                {{ laneResult(p).label }}
+              <div class="this-match-table">
+                <div class="tm-row tm-head">
+                  <span>Stat</span>
+                  <span>Lvl</span>
+                  <span>KDA</span>
+                  <span>LH/DN</span>
+                  <span>GPM/XPM</span>
+                  <span>NW</span>
+                  <span>Dmg</span>
+                </div>
+                <div class="tm-row">
+                  <span class="tm-key">Total</span>
+                  <span>{{ p.thisMatch.level ?? '—' }}</span>
+                  <span>{{ p.thisMatch.kills }}/{{ p.thisMatch.deaths }}/{{ p.thisMatch.assists }}</span>
+                  <span>{{ p.thisMatch.numLastHits }}/{{ p.thisMatch.numDenies }}</span>
+                  <span>{{ p.thisMatch.goldPerMinute }}/{{ p.thisMatch.experiencePerMinute }}</span>
+                  <span>{{ compact(p.thisMatch.networth) }}</span>
+                  <span>{{ compact(p.thisMatch.heroDamage) }}</span>
+                </div>
+                <div v-if="statsAt10(p)" class="tm-row">
+                  <span class="tm-key">@10</span>
+                  <span>{{ statsAt10(p).level }}</span>
+                  <span>{{ statsAt10(p).kills }}/{{ statsAt10(p).deaths }}/{{ statsAt10(p).assists }}</span>
+                  <span>{{ statsAt10(p).lastHits }}/{{ statsAt10(p).denies }}</span>
+                  <span>{{ statsAt10(p).gpm }}/{{ statsAt10(p).xpm }}</span>
+                  <span>{{ compact(statsAt10(p).networth) }}</span>
+                  <span>{{ compact(statsAt10(p).heroDamage) }}</span>
+                </div>
               </div>
             </div>
 
@@ -472,6 +560,13 @@ async function loadByMatchId() {
               <div class="section">
                 <div class="section-label">Top Ranked Heroes · 3 Months</div>
                 <div v-if="!topHeroes(p.accountId).length" class="no-data">No data</div>
+                <div v-else class="top-hero-row list-head">
+                  <span class="list-head-hero">Hero</span>
+                  <span />
+                  <span />
+                  <span>Record</span>
+                  <span>Win %</span>
+                </div>
                 <div
                   v-for="h in topHeroes(p.accountId)"
                   :key="h.heroId"
@@ -482,11 +577,12 @@ async function loadByMatchId() {
                     :src="`${HERO_ICON}/${h.hero.shortName}.png`"
                     class="top-hero-icon"
                   />
+                  <span v-else />
                   <span class="top-hero-name">{{ h.hero?.displayName }}</span>
-                  <span class="top-hero-stats">
-                    <span :class="winRate(h) >= 50 ? 'wr-good' : 'wr-bad'">{{ winRate(h) }}%</span>
-                    <span class="record">{{ h.winCount }}W · {{ h.matchCount - h.winCount }}L</span>
-                  </span>
+                  <span />
+                  <span />
+                  <span class="record">{{ h.winCount }}W · {{ h.matchCount - h.winCount }}L</span>
+                  <span :class="winRate(h) >= 50 ? 'wr-good' : 'wr-bad'">{{ winRate(h) }}%</span>
                 </div>
               </div>
 
@@ -494,6 +590,13 @@ async function loadByMatchId() {
               <div class="section">
                 <div class="section-label">Recent Ranked Matches</div>
                 <div v-if="!recentMatches(p.accountId).length" class="no-data">No data</div>
+                <div v-else class="match-row list-head">
+                  <span class="list-head-hero">Hero</span>
+                  <span />
+                  <span>KDA</span>
+                  <span>Length</span>
+                  <span>When</span>
+                </div>
                 <div
                   v-for="m in recentMatches(p.accountId)"
                   :key="m.id"
@@ -526,8 +629,8 @@ async function loadByMatchId() {
 
             </template>
           </div>
-        </div>
-      </div>
+        </template>
+      </template>
     </div>
   </div>
 </template>
@@ -638,16 +741,44 @@ async function loadByMatchId() {
 
 .teams {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 1.5rem;
+  row-gap: 0.75rem;
 }
-@media (max-width: 800px) { .teams { grid-template-columns: 1fr; } }
+
+.lane-row-label {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-muted, #7a8799);
+}
+.lane-row-label::before,
+.lane-row-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border, #2e3542);
+}
+
+.card-radiant { border-left: 3px solid rgba(75,180,95,.6); }
+.card-dire    { border-left: 3px solid rgba(200,60,60,.6); }
+
+@media (max-width: 800px) {
+  .teams { grid-template-columns: minmax(0, 1fr); }
+  .team-heading { display: none; }
+  .player-card-spacer { display: none; }
+}
 
 .team-heading {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  margin-bottom: 0.75rem;
 }
 .team-label {
   font-size: 0.72rem;
@@ -667,7 +798,6 @@ async function loadByMatchId() {
 .radiant-label { background: rgba(75,180,95,.15); color: #4bb45f; border: 1px solid rgba(75,180,95,.3); }
 .dire-label    { background: rgba(200,60,60,.15);  color: #c83c3c; border: 1px solid rgba(200,60,60,.3); }
 
-.player-list { display: flex; flex-direction: column; gap: 0.75rem; }
 
 .player-card {
   background: var(--color-surface, #1a1f2b);
@@ -681,6 +811,7 @@ async function loadByMatchId() {
   align-items: center;
   gap: 0.65rem;
   margin-bottom: 0.5rem;
+  padding-bottom: 0.6rem;
 }
 
 .avatar {
@@ -792,38 +923,39 @@ async function loadByMatchId() {
   color: var(--color-muted, #7a8799);
 }
 
-.this-match-stats {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.4rem;
+.this-match-table {
   margin-top: 0.5rem;
-  font-variant-numeric: tabular-nums;
+  overflow-x: auto;
 }
-@media (max-width: 420px) {
-  .this-match-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-.stat {
-  display: flex;
-  flex-direction: column;
+.tm-row {
+  display: grid;
+  grid-template-columns: 2.4rem 1.8rem minmax(3.6rem, 1fr) minmax(3rem, 1fr) minmax(4.4rem, 1fr) minmax(2.8rem, 1fr) minmax(2.8rem, 1fr);
+  column-gap: 0.5rem;
   align-items: center;
-  min-width: 0;
-}
-.stat-val {
+  padding: 0.18rem 0;
   font-size: 0.78rem;
-  font-weight: 600;
   color: var(--color-text);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.stat-label {
-  font-size: 0.6rem;
+.tm-key {
+  font-size: 0.66rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-muted, #7a8799);
 }
 
+.this-match-hero-line {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
 .lane-outcome {
   display: inline-block;
-  margin-top: 0.5rem;
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 0.66rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -863,13 +995,17 @@ async function loadByMatchId() {
 }
 
 .section { margin-top: 0.6rem; }
+.section:not(:last-child) { padding-bottom: 0.6rem; }
 .section-label {
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--color-muted, #7a8799);
-  margin-bottom: 0.35rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text);
+  border-left: 2px solid var(--color-accent, #34bfff);
+  padding-left: 0.45rem;
+  line-height: 1.1;
+  margin-bottom: 0.5rem;
 }
 
 .no-data {
@@ -885,8 +1021,8 @@ async function loadByMatchId() {
   padding: 0.18rem 0;
   font-variant-numeric: tabular-nums;
 }
-.top-hero-row { grid-template-columns: 22px minmax(0, 1fr) 2.6rem 5rem; }
-.match-row    { grid-template-columns: 22px minmax(0, 1fr) 1rem 4.6rem 2.8rem 3.2rem; }
+.top-hero-row,
+.match-row { grid-template-columns: 22px minmax(0, 1fr) 1rem 4.6rem 4.6rem 3.2rem; }
 
 .top-hero-icon,
 .match-hero-icon {
@@ -906,27 +1042,35 @@ async function loadByMatchId() {
   text-overflow: ellipsis;
 }
 
-.top-hero-stats { display: contents; }
-.wr-good, .wr-bad { font-size: 0.76rem; font-weight: 700; text-align: right; }
+.wr-good, .wr-bad { font-size: 0.76rem; font-weight: 700; }
 .wr-good { color: #4bb45f; }
 .wr-bad  { color: #c83c3c; }
-.record  { font-size: 0.72rem; color: var(--color-muted, #7a8799); text-align: right; }
+.record  { font-size: 0.72rem; color: var(--color-muted, #7a8799); }
 
-.match-result { font-size: 0.74rem; font-weight: 700; text-align: center; }
+.match-result { font-size: 0.74rem; font-weight: 700; }
 .win  { color: #4bb45f; }
 .loss { color: #c83c3c; }
 
 .match-kda {
   font-size: 0.74rem;
   color: var(--color-text);
-  text-align: center;
 }
 .match-duration,
 .match-ago {
   font-size: 0.72rem;
   color: var(--color-muted, #7a8799);
-  text-align: right;
 }
+
+.list-head,
+.tm-head {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted, #7a8799);
+  padding-bottom: 0.3rem;
+}
+.list-head-hero { grid-column: span 2; }
 
 .show-more-btn {
   display: block;
