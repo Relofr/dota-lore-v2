@@ -5,31 +5,38 @@ import {
   fetchMatchPlayers,
   fetchPlayerMatches,
   fetchRankedPeriodPage,
+  fetchItems,
   PERIOD_PAGE_SIZE,
 } from '@/services/stratzApi.js'
+import {
+  LANE_MINUTE,
+  POSITION_LABELS,
+  compact,
+  formatTime,
+  statsAt,
+  groupByLane,
+  laneLeads,
+  laneBreakdown,
+  laneOutcomeText,
+  gameFacts,
+} from '@/utils/matchAnalysis.js'
 import StratzIcon from '@/components/StratzIcon.vue'
 import RankMedal from '@/components/RankMedal.vue'
+import LeadChart from '@/components/scout/LeadChart.vue'
+import ItemRow from '@/components/scout/ItemRow.vue'
+import LaneBreakdown from '@/components/scout/LaneBreakdown.vue'
 
 const HERO_ICON = 'https://cdn.cloudflare.steamstatic.com/apps/dota2/images/dota_react/heroes/icons'
 const OPENDOTA_ICON = 'https://www.opendota.com/assets/images/icons/icon-512x512.png'
 const DOTABUFF_ICON = 'https://www.dotabuff.com/assets/favicon-retina-377ae687bcef452311a9c4303e2efcb1a3e9dceeb924084856e960256862b843.png'
-// OpenDota's live tracker misses most public games, so auto-detect is off until there's a reliable source.
-const SHOW_STEAM_SEARCH = false
-const STORAGE_KEY = 'scout_steam_id'
-
-const POSITION_LABELS = {
-  POSITION_1: 'Carry',
-  POSITION_2: 'Mid',
-  POSITION_3: 'Offlane',
-  POSITION_4: 'Soft Support',
-  POSITION_5: 'Hard Support',
-}
-
-const steamIdInput = ref('')
 const matchIdInput = ref('')
 const loading = ref(false)
 const error = ref(null)
 const match = ref(null)
+const view = ref('laning')
+const teamMetric = ref('networth')
+const itemMap = ref(new Map())
+const historyOpen = ref({})
 const playerData = ref({})
 const dataLoading = ref({})
 const periodLoading = ref({})
@@ -37,23 +44,38 @@ const moreLoading = ref({})
 const noMoreMatches = ref({})
 
 onMounted(() => {
-  steamIdInput.value = localStorage.getItem(STORAGE_KEY) ?? ''
+  fetchItems()
+    .then(map => { itemMap.value = map })
+    .catch(err => console.error('[Scout] items:', err.message))
 })
 
-const radiantPlayers = computed(() => match.value?.players?.filter(p => p.isRadiant) ?? [])
-const direPlayers = computed(() => match.value?.players?.filter(p => !p.isRadiant) ?? [])
+const players = computed(() => match.value?.players ?? [])
 
-const MAP_LANES = [
-  { key: 'bottom', label: 'Bottom Lane' },
-  { key: 'mid', label: 'Mid Lane' },
-  { key: 'top', label: 'Top Lane' },
-  { key: 'other', label: 'Jungle / Roaming' },
-]
+const laneGroups = computed(() => groupByLane(players.value).map(group => {
+  const outcome = laneOutcomeText(match.value?.laneOutcomes?.[group.key])
+  return {
+    ...group,
+    outcome,
+    leads: laneLeads(group),
+    breakdown: laneBreakdown(group, players.value, outcome),
+    rows: pairUp(group.radiant, group.dire),
+  }
+}))
 
-function positionNumber(p) {
-  const m = /POSITION_(\d)/.exec(p.thisMatch?.position ?? '')
-  return m ? Number(m[1]) : 9
-}
+const facts = computed(() => gameFacts(match.value, view.value))
+
+const teamSeries = computed(() => {
+  const m = match.value
+  if (!m) return null
+  const source = teamMetric.value === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
+  if (!source?.length) return null
+  return view.value === 'laning' ? source.slice(0, LANE_MINUTE + 1) : source
+})
+
+const teamKills = computed(() => {
+  const sum = arr => (arr ?? []).reduce((a, b) => a + b, 0)
+  return { radiant: sum(match.value?.radiantKills), dire: sum(match.value?.direKills) }
+})
 
 function pairUp(radiant, dire) {
   const rows = []
@@ -63,25 +85,57 @@ function pairUp(radiant, dire) {
   return rows
 }
 
-// Rows pair each player with who they laned against; live matches have no lane data, so they fall back to team order.
-const layoutRows = computed(() => {
-  const players = match.value?.players ?? []
-  if (!players.length || !players.every(p => p.thisMatch?.lane)) {
-    return pairUp(radiantPlayers.value, direPlayers.value)
+function windowed(values) {
+  return view.value === 'laning' ? values.slice(0, LANE_MINUTE + 1) : values
+}
+
+function laneExtras(leads) {
+  return [
+    { label: 'XP lead', values: windowed(leads.experience) },
+    { label: 'Last hit lead', values: windowed(leads.lastHits) },
+  ]
+}
+
+function positionText(p) {
+  const pos = p.thisMatch?.position
+  const n = /POSITION_(\d)/.exec(pos ?? '')?.[1]
+  return n ? `Pos ${n} · ${POSITION_LABELS[pos]}` : null
+}
+
+function laneItems(p) {
+  const purchases = p.thisMatch?.stats?.itemPurchases ?? []
+  const grouped = new Map()
+  for (const buy of purchases) {
+    if (buy.time > LANE_MINUTE * 60) continue
+    if (itemMap.value.get(buy.itemId)?.stat?.isRecipe) continue
+    const seen = grouped.get(buy.itemId)
+    if (seen) seen.count++
+    else grouped.set(buy.itemId, { id: buy.itemId, time: buy.time, count: 1 })
   }
-  const rows = []
-  for (const lane of MAP_LANES) {
-    const inLane = players.filter(p => (mapLane(p.thisMatch.lane, p.isRadiant) ?? 'other') === lane.key)
-    if (!inLane.length) continue
-    const side = isRadiant => inLane
-      .filter(p => p.isRadiant === isRadiant)
-      .sort((a, b) => positionNumber(a) - positionNumber(b))
-    const laneRows = pairUp(side(true), side(false))
-    laneRows[0].label = lane.label
-    rows.push(...laneRows)
-  }
-  return rows
-})
+  return [...grouped.values()]
+}
+
+function finalItems(p) {
+  const tm = p.thisMatch ?? {}
+  const slot = (id, kind) => (id ? [{ id, kind }] : [])
+  return [
+    ...[0, 1, 2, 3, 4, 5].flatMap(i => slot(tm[`item${i}Id`], 'slot')),
+    ...slot(tm.neutral0Id, 'neutral'),
+    ...[0, 1, 2].flatMap(i => slot(tm[`backpack${i}Id`], 'backpack')),
+  ]
+}
+
+function playerItems(p) {
+  return view.value === 'laning' ? laneItems(p) : finalItems(p)
+}
+
+function toggleHistory(key) {
+  historyOpen.value[key] = !historyOpen.value[key]
+}
+
+function cardKey(p) {
+  return p.thisMatch?.playerSlot ?? p.heroId
+}
 
 function topHeroes(accountId) {
   const games = playerData.value[accountId]?.recentPeriod
@@ -112,66 +166,6 @@ function playerRoles(accountId) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 2)
     .map(([pos]) => POSITION_LABELS[pos] ?? pos)
-}
-
-const LANE_NAMES = {
-  SAFE_LANE: 'Safe Lane',
-  MID_LANE: 'Mid',
-  OFF_LANE: 'Off Lane',
-  JUNGLE: 'Jungle',
-  ROAMING: 'Roaming',
-}
-
-// Radiant's safe lane is bottom and Dire's is top; the off lanes are the reverse.
-function mapLane(lane, isRadiant) {
-  if (lane === 'MID_LANE') return 'mid'
-  if (lane === 'SAFE_LANE') return isRadiant ? 'bottom' : 'top'
-  if (lane === 'OFF_LANE') return isRadiant ? 'top' : 'bottom'
-  return null
-}
-
-function laneResult(p) {
-  const s = p.thisMatch
-  const mapLaneKey = s && mapLane(s.lane, p.isRadiant)
-  const outcome = mapLaneKey && match.value?.laneOutcomes?.[mapLaneKey]
-  if (!outcome) return null
-  if (outcome === 'TIE') return { label: 'Lane Tied', tone: 'even' }
-  const radiantWon = outcome.startsWith('RADIANT')
-  const stomp = outcome.endsWith('STOMP')
-  const won = radiantWon === p.isRadiant
-  return {
-    label: won ? (stomp ? 'Lane Won · Stomp' : 'Lane Won') : (stomp ? 'Lane Lost · Stomped' : 'Lane Lost'),
-    tone: won ? 'win' : 'loss',
-  }
-}
-
-const AT_MINUTE = 10
-
-// Per-minute timelines from Stratz: LH, denies, damage, gold and XP are amounts gained each minute;
-// net worth is a running total starting at minute 0; level lists the second each level was reached.
-function statsAt10(p) {
-  const s = p.thisMatch?.stats
-  if (!s?.networthPerMinute?.length) return null
-  const cutoff = AT_MINUTE * 60
-  const sumFirst = arr => (arr ?? []).slice(0, AT_MINUTE).reduce((a, b) => a + b, 0)
-  const eventsBy = events => (events ?? []).filter(e => e.time <= cutoff).length
-  return {
-    kills: eventsBy(s.killEvents),
-    deaths: eventsBy(s.deathEvents),
-    assists: eventsBy(s.assistEvents),
-    lastHits: sumFirst(s.lastHitsPerMinute),
-    denies: sumFirst(s.deniesPerMinute),
-    gpm: Math.round(sumFirst(s.goldPerMinute) / AT_MINUTE),
-    xpm: Math.round(sumFirst(s.experiencePerMinute) / AT_MINUTE),
-    networth: s.networthPerMinute[Math.min(AT_MINUTE, s.networthPerMinute.length - 1)],
-    heroDamage: sumFirst(s.heroDamagePerMinute),
-    level: (s.level ?? []).filter(t => t <= cutoff).length,
-  }
-}
-
-function compact(n) {
-  if (n == null) return '—'
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
 function isPrivate(p) {
@@ -217,11 +211,6 @@ function matchWon(m) {
   return p.isRadiant === m.didRadiantWin
 }
 
-function formatDuration(s) {
-  if (!s) return '—'
-  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`
-}
-
 function timeAgo(unix) {
   if (!unix) return ''
   const s = Date.now() / 1000 - unix
@@ -263,25 +252,6 @@ async function loadAllPlayerData() {
   for (const id of ids) await loadRestOfPeriod(id)
 }
 
-function parseSteamId(rawId) {
-  const n = BigInt(rawId.trim())
-  return n > 76561197960265728n ? Number(n - 76561197960265728n) : Number(n)
-}
-
-function buildMatch(found) {
-  match.value = {
-    matchId: found.match_id,
-    gameTime: found.game_time,
-    players: (found.players ?? []).map(p => ({
-      accountId: p.account_id,
-      heroId: p.hero_id,
-      isRadiant: p.team === 0,
-      name: p.name ?? `Player ${p.account_id}`,
-    }))
-  }
-  loadAllPlayerData()
-}
-
 async function showMoreMatches(accountId) {
   const data = playerData.value[accountId]
   if (!data || moreLoading.value[accountId]) return
@@ -304,35 +274,8 @@ function resetState() {
   moreLoading.value = {}
   noMoreMatches.value = {}
   periodLoading.value = {}
+  historyOpen.value = {}
   error.value = null
-}
-
-async function fetchLiveGames() {
-  const res = await fetch('https://api.opendota.com/api/live')
-  if (!res.ok) throw new Error(`OpenDota returned ${res.status}`)
-  return res.json()
-}
-
-async function findGame() {
-  const rawId = steamIdInput.value.trim()
-  if (!rawId) return
-  localStorage.setItem(STORAGE_KEY, rawId)
-  const accountId = parseSteamId(rawId)
-  loading.value = true
-  resetState()
-  try {
-    const liveMatches = await fetchLiveGames()
-    const found = liveMatches.find(m => m.players?.some(p => p.account_id === accountId))
-    if (!found) {
-      error.value = `Your game wasn't found in OpenDota's live tracker (${liveMatches.length} games tracked). Enter your match ID below — get it from the Dota 2 console with: dota_match_id`
-      return
-    }
-    buildMatch(found)
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    loading.value = false
-  }
 }
 
 async function loadByMatchId() {
@@ -347,9 +290,8 @@ async function loadByMatchId() {
       return
     }
     match.value = {
+      ...data,
       matchId: data.id,
-      gameTime: null,
-      didRadiantWin: data.didRadiantWin,
       laneOutcomes: {
         top: data.topLaneOutcome,
         mid: data.midLaneOutcome,
@@ -362,7 +304,7 @@ async function loadByMatchId() {
         name: p.steamAccount?.name ?? `Player ${p.steamAccountId}`,
         avatar: p.steamAccount?.avatar ?? null,
         thisMatch: p,
-      }))
+      })),
     }
     loadAllPlayerData()
   } catch (err) {
@@ -377,20 +319,6 @@ async function loadByMatchId() {
   <div class="scout-page">
     <header class="scout-header">
       <h1 class="scout-title">Match Scout</h1>
-      <template v-if="SHOW_STEAM_SEARCH">
-        <div class="search-row">
-          <input
-            v-model="steamIdInput"
-            class="match-input"
-            placeholder="Steam ID or Steam64..."
-            @keydown.enter="findGame"
-          />
-          <button class="load-btn" :disabled="loading" @click="findGame">
-            {{ loading ? 'Searching…' : 'Find My Game' }}
-          </button>
-        </div>
-        <div class="divider-row"><span class="divider-text">or enter match ID manually</span></div>
-      </template>
       <div class="search-row">
         <input
           v-model="matchIdInput"
@@ -398,269 +326,310 @@ async function loadByMatchId() {
           placeholder="Match ID"
           @keydown.enter="loadByMatchId"
         />
-        <button class="load-btn" :class="{ secondary: SHOW_STEAM_SEARCH }" :disabled="loading" @click="loadByMatchId">
-          {{ loading && !SHOW_STEAM_SEARCH ? 'Loading…' : 'Load Match' }}
+        <button class="load-btn" :disabled="loading" @click="loadByMatchId">
+          {{ loading ? 'Loading…' : 'Load Match' }}
         </button>
       </div>
       <p v-if="error" class="error-msg">{{ error }}</p>
     </header>
 
-    <div v-if="match" class="match-info">
-      <p class="match-summary">
-        Viewing match <strong class="match-id">{{ match.matchId }}</strong>
-        <template v-if="match.gameTime != null"> at {{ formatDuration(match.gameTime) }}</template>
-      </p>
-      <p class="match-note">
-        All player stats are from ranked matches only. Win rates and top heroes cover the last 3 months.
-      </p>
-    </div>
-
-    <div v-if="match" class="teams">
-      <div v-for="ti in [0, 1]" :key="`heading-${ti}`" class="team-heading">
-        <div class="team-label" :class="ti === 0 ? 'radiant-label' : 'dire-label'">
-          {{ ti === 0 ? 'Radiant' : 'Dire' }}
+    <template v-if="match">
+      <!-- Match summary -->
+      <section class="panel summary">
+        <div class="summary-top">
+          <div class="team-side">
+            <span class="team-label radiant-label">Radiant</span>
+            <span v-if="match.didRadiantWin === true" class="team-result">Victory</span>
+          </div>
+          <div class="summary-center">
+            <div class="score">
+              <span>{{ teamKills.radiant }}</span>
+              <span class="score-sep">–</span>
+              <span>{{ teamKills.dire }}</span>
+            </div>
+            <div class="summary-meta">
+              Match <strong>{{ match.matchId }}</strong> · {{ formatTime(match.durationSeconds) }}
+            </div>
+          </div>
+          <div class="team-side team-side-right">
+            <span v-if="match.didRadiantWin === false" class="team-result">Victory</span>
+            <span class="team-label dire-label">Dire</span>
+          </div>
         </div>
-        <span
-          v-if="match.didRadiantWin != null"
-          class="team-result"
-          :class="match.didRadiantWin === (ti === 0) ? 'win' : 'loss'"
-        >{{ match.didRadiantWin === (ti === 0) ? 'Victory' : 'Defeat' }}</span>
-      </div>
 
-      <template v-for="(row, ri) in layoutRows" :key="`row-${ri}`">
-        <div v-if="row.label" class="lane-row-label">{{ row.label }}</div>
-        <template v-for="(p, side) in [row.radiant, row.dire]" :key="`cell-${ri}-${side}`">
-          <div v-if="!p" class="player-card-spacer" />
-          <div v-else class="player-card" :class="side === 0 ? 'card-radiant' : 'card-dire'">
+        <div class="view-toggle" role="tablist" aria-label="Time range">
+          <button
+            role="tab"
+            :aria-selected="view === 'laning'"
+            :class="{ active: view === 'laning' }"
+            @click="view = 'laning'"
+          >Laning · 0–{{ LANE_MINUTE }} min</button>
+          <button
+            role="tab"
+            :aria-selected="view === 'full'"
+            :class="{ active: view === 'full' }"
+            @click="view = 'full'"
+          >Full game</button>
+        </div>
 
-            <!-- Player header -->
-            <div class="player-header">
-              <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" />
-              <div v-else class="avatar avatar-empty" />
-              <div class="player-info">
-                <div class="name-row">
-                  <RankMedal
-                    v-if="playerData[p.accountId]?.steamAccount?.seasonRank"
-                    :rank="playerData[p.accountId].steamAccount.seasonRank"
-                    :leaderboard-rank="playerData[p.accountId].steamAccount.seasonLeaderboardRank"
-                  />
-                  <span class="player-name">{{ playerName(p) }}</span>
-                  <template v-if="!dataLoading[p.accountId] && playerRoles(p.accountId).length">
-                    <span class="name-divider" aria-hidden="true" />
-                    <span
-                      v-for="role in playerRoles(p.accountId)"
-                      :key="role"
-                      class="role-badge"
-                    >{{ role }}</span>
+        <div class="summary-body">
+          <div v-if="teamSeries" class="summary-chart">
+            <div class="metric-toggle" role="radiogroup" aria-label="Team lead metric">
+              <button
+                role="radio"
+                :aria-checked="teamMetric === 'networth'"
+                :class="{ active: teamMetric === 'networth' }"
+                @click="teamMetric = 'networth'"
+              >Net worth</button>
+              <button
+                role="radio"
+                :aria-checked="teamMetric === 'experience'"
+                :class="{ active: teamMetric === 'experience' }"
+                @click="teamMetric = 'experience'"
+              >Experience</button>
+            </div>
+            <LeadChart
+              :values="teamSeries"
+              :label="teamMetric === 'networth' ? 'Team net worth lead' : 'Team experience lead'"
+              :height="170"
+            />
+          </div>
+          <dl class="facts">
+            <div v-for="f in facts" :key="f.label" class="fact">
+              <dt>{{ f.label }}</dt>
+              <dd>{{ f.value }}</dd>
+            </div>
+          </dl>
+        </div>
+        <p class="match-note">
+          Player history covers ranked matches only; win rates and top heroes use the last 3 months.
+        </p>
+      </section>
+
+      <!-- Lanes -->
+      <section v-for="group in laneGroups" :key="group.key" class="panel lane-panel">
+        <header class="lane-head">
+          <h2 class="lane-title">{{ group.label }}</h2>
+          <span v-if="group.outcome" class="lane-outcome" :class="`lane-${group.outcome.side}`">
+            {{ group.outcome.text }}
+          </span>
+          <span v-if="group.radiantRole" class="lane-roles">
+            Radiant {{ group.radiantRole.toLowerCase() }} vs Dire {{ group.direRole.toLowerCase() }}
+          </span>
+        </header>
+
+        <div v-if="group.leads" class="lane-chart">
+          <LeadChart
+            :values="windowed(group.leads.networth)"
+            :extras="laneExtras(group.leads)"
+            label="Lane net worth lead"
+            :height="170"
+          />
+        </div>
+
+        <div class="lane-body" :class="{ 'has-side': group.breakdown }">
+        <aside v-if="group.breakdown" class="lane-side">
+          <LaneBreakdown :breakdown="group.breakdown" :minute="LANE_MINUTE" />
+        </aside>
+
+        <div class="lane-players">
+          <template v-for="(row, ri) in group.rows" :key="`row-${ri}`">
+            <template v-for="(p, side) in [row.radiant, row.dire]" :key="`cell-${ri}-${side}`">
+              <div v-if="!p" class="player-card-spacer" />
+              <div v-else class="player-card" :class="side === 0 ? 'card-radiant' : 'card-dire'">
+
+                <div class="player-header">
+                  <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" />
+                  <div v-else class="avatar avatar-empty" />
+                  <div class="player-info">
+                    <div class="name-row">
+                      <span class="name-main">
+                        <RankMedal
+                          v-if="playerData[p.accountId]?.steamAccount?.seasonRank"
+                          :rank="playerData[p.accountId].steamAccount.seasonRank"
+                          :leaderboard-rank="playerData[p.accountId].steamAccount.seasonLeaderboardRank"
+                        />
+                        <span class="player-name">{{ playerName(p) }}</span>
+                      </span>
+                      <template v-if="!dataLoading[p.accountId] && playerRoles(p.accountId).length">
+                        <span class="name-divider" aria-hidden="true" />
+                        <span v-for="role in playerRoles(p.accountId)" :key="role" class="role-badge">{{ role }}</span>
+                      </template>
+                    </div>
+                    <div v-if="overallRecord(p)" class="overall-wr" title="Ranked win rate, last 3 months">
+                      <span :class="overallRecord(p).rate >= 50 ? 'wr-good' : 'wr-bad'">{{ overallRecord(p).rate }}%</span>
+                      <span class="record">{{ overallRecord(p).wins.toLocaleString() }}W · {{ overallRecord(p).losses.toLocaleString() }}L</span>
+                      <span v-if="periodLoading[p.accountId]" class="record">counting…</span>
+                    </div>
+                    <div v-else-if="playerData[p.accountId] && !isPrivate(p)" class="overall-wr">
+                      <span class="record">No ranked games · 3 months</span>
+                    </div>
+                  </div>
+                  <div v-if="p.accountId" class="profile-links">
+                    <a :href="`https://stratz.com/players/${p.accountId}`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open Stratz profile" aria-label="Open Stratz profile">
+                      <StratzIcon class="profile-logo" />
+                    </a>
+                    <a :href="`https://www.opendota.com/players/${p.accountId}/overview`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open OpenDota profile" aria-label="Open OpenDota profile">
+                      <img :src="OPENDOTA_ICON" class="profile-logo" alt="" />
+                    </a>
+                    <a :href="`https://www.dotabuff.com/players/${p.accountId}`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open Dotabuff profile" aria-label="Open Dotabuff profile">
+                      <img :src="DOTABUFF_ICON" class="profile-logo" alt="" />
+                    </a>
+                  </div>
+                </div>
+
+                <template v-if="p.thisMatch">
+                  <div class="hero-line">
+                    <img
+                      v-if="p.thisMatch.hero?.shortName"
+                      :src="`${HERO_ICON}/${p.thisMatch.hero.shortName}.png`"
+                      class="hero-line-icon"
+                      alt=""
+                    />
+                    <span class="hero-line-name">{{ p.thisMatch.hero?.displayName ?? '—' }}</span>
+                    <span v-if="positionText(p)" class="hero-line-pos">{{ positionText(p) }}</span>
+                  </div>
+
+                  <div class="this-match-table">
+                    <div class="tm-row tm-head">
+                      <span>Stat</span>
+                      <span>Lvl</span>
+                      <span>KDA</span>
+                      <span>LH/DN</span>
+                      <span>GPM/XPM</span>
+                      <span>NW</span>
+                      <span>Dmg</span>
+                    </div>
+                    <div v-if="statsAt(p.thisMatch)" class="tm-row" :class="{ 'tm-focus': view === 'laning' }">
+                      <span class="tm-key">@{{ LANE_MINUTE }}</span>
+                      <span>{{ statsAt(p.thisMatch).level }}</span>
+                      <span>{{ statsAt(p.thisMatch).kills }}/{{ statsAt(p.thisMatch).deaths }}/{{ statsAt(p.thisMatch).assists }}</span>
+                      <span>{{ statsAt(p.thisMatch).lastHits }}/{{ statsAt(p.thisMatch).denies }}</span>
+                      <span>{{ statsAt(p.thisMatch).gpm }}/{{ statsAt(p.thisMatch).xpm }}</span>
+                      <span>{{ compact(statsAt(p.thisMatch).networth) }}</span>
+                      <span>{{ compact(statsAt(p.thisMatch).heroDamage) }}</span>
+                    </div>
+                    <div class="tm-row" :class="{ 'tm-focus': view === 'full' }">
+                      <span class="tm-key">Total</span>
+                      <span>{{ p.thisMatch.level ?? '—' }}</span>
+                      <span>{{ p.thisMatch.kills }}/{{ p.thisMatch.deaths }}/{{ p.thisMatch.assists }}</span>
+                      <span>{{ p.thisMatch.numLastHits }}/{{ p.thisMatch.numDenies }}</span>
+                      <span>{{ p.thisMatch.goldPerMinute }}/{{ p.thisMatch.experiencePerMinute }}</span>
+                      <span>{{ compact(p.thisMatch.networth) }}</span>
+                      <span>{{ compact(p.thisMatch.heroDamage) }}</span>
+                    </div>
+                  </div>
+
+                  <div v-if="itemMap.size && playerItems(p).length" class="section items-section">
+                    <div class="section-label">{{ view === 'laning' ? `Items by ${LANE_MINUTE}:00` : 'Final items' }}</div>
+                    <ItemRow :items="playerItems(p)" :item-map="itemMap" />
+                  </div>
+                </template>
+
+                <button
+                  class="history-toggle"
+                  :aria-expanded="!!historyOpen[cardKey(p)]"
+                  @click="toggleHistory(cardKey(p))"
+                >
+                  <span>Player history</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" :class="{ open: historyOpen[cardKey(p)] }">
+                    <path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+
+                <div v-if="historyOpen[cardKey(p)]" class="history">
+                  <div v-if="dataLoading[p.accountId]" class="section-loading">Loading stats…</div>
+                  <div v-else-if="isPrivate(p)" class="private-profile">
+                    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                      <path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9z"/>
+                    </svg>
+                    Private Profile
+                  </div>
+                  <template v-else>
+                    <div class="section">
+                      <div class="section-label">Top Ranked Heroes · 3 Months</div>
+                      <div v-if="!topHeroes(p.accountId).length" class="no-data">No data</div>
+                      <div v-else class="top-hero-row list-head">
+                        <span class="list-head-hero">Hero</span>
+                        <span class="spacer-cell" />
+                        <span class="spacer-cell" />
+                        <span>Record</span>
+                        <span>Win %</span>
+                      </div>
+                      <div v-for="h in topHeroes(p.accountId)" :key="h.heroId" class="top-hero-row">
+                        <img v-if="h.hero?.shortName" :src="`${HERO_ICON}/${h.hero.shortName}.png`" class="top-hero-icon" alt="" />
+                        <span v-else />
+                        <span class="top-hero-name">{{ h.hero?.displayName }}</span>
+                        <span class="spacer-cell" />
+                        <span class="spacer-cell" />
+                        <span class="record">{{ h.winCount }}W · {{ h.matchCount - h.winCount }}L</span>
+                        <span :class="winRate(h) >= 50 ? 'wr-good' : 'wr-bad'">{{ winRate(h) }}%</span>
+                      </div>
+                    </div>
+
+                    <div class="section">
+                      <div class="section-label">Recent Ranked Matches</div>
+                      <div v-if="!recentMatches(p.accountId).length" class="no-data">No data</div>
+                      <div v-else class="match-row list-head">
+                        <span class="list-head-hero">Hero</span>
+                        <span />
+                        <span>KDA</span>
+                        <span>Length</span>
+                        <span>When</span>
+                      </div>
+                      <div v-for="m in recentMatches(p.accountId)" :key="m.id" class="match-row">
+                        <img v-if="m.players?.[0]?.hero?.shortName" :src="`${HERO_ICON}/${m.players[0].hero.shortName}.png`" class="match-hero-icon" alt="" />
+                        <span v-else />
+                        <span class="match-hero-name">{{ m.players?.[0]?.hero?.displayName ?? '—' }}</span>
+                        <span class="match-result" :class="matchWon(m) ? 'win' : 'loss'">{{ matchWon(m) ? 'W' : 'L' }}</span>
+                        <span class="match-kda">{{ m.players?.[0]?.kills }}/{{ m.players?.[0]?.deaths }}/{{ m.players?.[0]?.assists }}</span>
+                        <span class="match-duration">{{ formatTime(m.durationSeconds) }}</span>
+                        <span class="match-ago">{{ timeAgo(m.startDateTime) }}</span>
+                      </div>
+                      <button
+                        v-if="recentMatches(p.accountId).length >= 10 && !noMoreMatches[p.accountId]"
+                        class="show-more-btn"
+                        :disabled="moreLoading[p.accountId]"
+                        @click="showMoreMatches(p.accountId)"
+                      >
+                        {{ moreLoading[p.accountId] ? 'Loading…' : 'Show more' }}
+                      </button>
+                    </div>
                   </template>
                 </div>
-                <div v-if="overallRecord(p)" class="overall-wr" title="Ranked win rate, last 3 months">
-                  <span :class="overallRecord(p).rate >= 50 ? 'wr-good' : 'wr-bad'">{{ overallRecord(p).rate }}%</span>
-                  <span class="record">{{ overallRecord(p).wins.toLocaleString() }}W · {{ overallRecord(p).losses.toLocaleString() }}L</span>
-                  <span v-if="periodLoading[p.accountId]" class="record">counting…</span>
-                </div>
-                <div v-else-if="playerData[p.accountId] && !isPrivate(p)" class="overall-wr">
-                  <span class="record">No ranked games · 3 months</span>
-                </div>
               </div>
-              <div v-if="p.accountId" class="profile-links">
-                <a
-                  :href="`https://stratz.com/players/${p.accountId}`"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="profile-link"
-                  title="Open Stratz profile"
-                  aria-label="Open Stratz profile"
-                >
-                  <StratzIcon class="profile-logo" />
-                </a>
-                <a
-                  :href="`https://www.opendota.com/players/${p.accountId}/overview`"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="profile-link"
-                  title="Open OpenDota profile"
-                  aria-label="Open OpenDota profile"
-                >
-                  <img :src="OPENDOTA_ICON" class="profile-logo" alt="" />
-                </a>
-                <a
-                  :href="`https://www.dotabuff.com/players/${p.accountId}`"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="profile-link"
-                  title="Open Dotabuff profile"
-                  aria-label="Open Dotabuff profile"
-                >
-                  <img :src="DOTABUFF_ICON" class="profile-logo" alt="" />
-                </a>
-              </div>
-            </div>
-
-            <div v-if="p.thisMatch" class="section this-match">
-              <div class="section-label">This Match</div>
-              <div class="this-match-main">
-                <img
-                  v-if="p.thisMatch.hero?.shortName"
-                  :src="`${HERO_ICON}/${p.thisMatch.hero.shortName}.png`"
-                  class="this-match-hero-icon"
-                  alt=""
-                />
-                <div class="this-match-hero">
-                  <span class="this-match-hero-line">
-                    <span class="this-match-hero-name">{{ p.thisMatch.hero?.displayName ?? '—' }}</span>
-                    <span v-if="laneResult(p)" class="lane-outcome" :class="`lane-${laneResult(p).tone}`">
-                      {{ laneResult(p).label }}
-                    </span>
-                  </span>
-                  <span v-if="LANE_NAMES[p.thisMatch.lane]" class="this-match-sub">{{ LANE_NAMES[p.thisMatch.lane] }}</span>
-                </div>
-              </div>
-              <div class="this-match-table">
-                <div class="tm-row tm-head">
-                  <span>Stat</span>
-                  <span>Lvl</span>
-                  <span>KDA</span>
-                  <span>LH/DN</span>
-                  <span>GPM/XPM</span>
-                  <span>NW</span>
-                  <span>Dmg</span>
-                </div>
-                <div class="tm-row">
-                  <span class="tm-key">Total</span>
-                  <span>{{ p.thisMatch.level ?? '—' }}</span>
-                  <span>{{ p.thisMatch.kills }}/{{ p.thisMatch.deaths }}/{{ p.thisMatch.assists }}</span>
-                  <span>{{ p.thisMatch.numLastHits }}/{{ p.thisMatch.numDenies }}</span>
-                  <span>{{ p.thisMatch.goldPerMinute }}/{{ p.thisMatch.experiencePerMinute }}</span>
-                  <span>{{ compact(p.thisMatch.networth) }}</span>
-                  <span>{{ compact(p.thisMatch.heroDamage) }}</span>
-                </div>
-                <div v-if="statsAt10(p)" class="tm-row">
-                  <span class="tm-key">@10</span>
-                  <span>{{ statsAt10(p).level }}</span>
-                  <span>{{ statsAt10(p).kills }}/{{ statsAt10(p).deaths }}/{{ statsAt10(p).assists }}</span>
-                  <span>{{ statsAt10(p).lastHits }}/{{ statsAt10(p).denies }}</span>
-                  <span>{{ statsAt10(p).gpm }}/{{ statsAt10(p).xpm }}</span>
-                  <span>{{ compact(statsAt10(p).networth) }}</span>
-                  <span>{{ compact(statsAt10(p).heroDamage) }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="dataLoading[p.accountId]" class="section-loading">Loading stats…</div>
-            <div v-else-if="isPrivate(p)" class="private-profile">
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                <path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9z"/>
-              </svg>
-              Private Profile
-            </div>
-            <template v-else>
-
-              <!-- Top 3 heroes (last 3 months) -->
-              <div class="section">
-                <div class="section-label">Top Ranked Heroes · 3 Months</div>
-                <div v-if="!topHeroes(p.accountId).length" class="no-data">No data</div>
-                <div v-else class="top-hero-row list-head">
-                  <span class="list-head-hero">Hero</span>
-                  <span />
-                  <span />
-                  <span>Record</span>
-                  <span>Win %</span>
-                </div>
-                <div
-                  v-for="h in topHeroes(p.accountId)"
-                  :key="h.heroId"
-                  class="top-hero-row"
-                >
-                  <img
-                    v-if="h.hero?.shortName"
-                    :src="`${HERO_ICON}/${h.hero.shortName}.png`"
-                    class="top-hero-icon"
-                  />
-                  <span v-else />
-                  <span class="top-hero-name">{{ h.hero?.displayName }}</span>
-                  <span />
-                  <span />
-                  <span class="record">{{ h.winCount }}W · {{ h.matchCount - h.winCount }}L</span>
-                  <span :class="winRate(h) >= 50 ? 'wr-good' : 'wr-bad'">{{ winRate(h) }}%</span>
-                </div>
-              </div>
-
-              <!-- Last 10 matches -->
-              <div class="section">
-                <div class="section-label">Recent Ranked Matches</div>
-                <div v-if="!recentMatches(p.accountId).length" class="no-data">No data</div>
-                <div v-else class="match-row list-head">
-                  <span class="list-head-hero">Hero</span>
-                  <span />
-                  <span>KDA</span>
-                  <span>Length</span>
-                  <span>When</span>
-                </div>
-                <div
-                  v-for="m in recentMatches(p.accountId)"
-                  :key="m.id"
-                  class="match-row"
-                >
-                  <img
-                    v-if="m.players?.[0]?.hero?.shortName"
-                    :src="`${HERO_ICON}/${m.players[0].hero.shortName}.png`"
-                    class="match-hero-icon"
-                  />
-                  <span class="match-hero-name">{{ m.players?.[0]?.hero?.displayName ?? '—' }}</span>
-                  <span class="match-result" :class="matchWon(m) ? 'win' : 'loss'">
-                    {{ matchWon(m) ? 'W' : 'L' }}
-                  </span>
-                  <span class="match-kda">
-                    {{ m.players?.[0]?.kills }}/{{ m.players?.[0]?.deaths }}/{{ m.players?.[0]?.assists }}
-                  </span>
-                  <span class="match-duration">{{ formatDuration(m.durationSeconds) }}</span>
-                  <span class="match-ago">{{ timeAgo(m.startDateTime) }}</span>
-                </div>
-                <button
-                  v-if="recentMatches(p.accountId).length >= 10 && !noMoreMatches[p.accountId]"
-                  class="show-more-btn"
-                  :disabled="moreLoading[p.accountId]"
-                  @click="showMoreMatches(p.accountId)"
-                >
-                  {{ moreLoading[p.accountId] ? 'Loading…' : 'Show more' }}
-                </button>
-              </div>
-
             </template>
-          </div>
-        </template>
-      </template>
-    </div>
+          </template>
+        </div>
+        </div>
+      </section>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .scout-page {
-  max-width: 1300px;
+  max-width: 1680px;
   margin: 0 auto;
   padding: 2rem 1rem;
 }
 
 .scout-header {
   text-align: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
-
 .scout-title {
   font-size: 1.8rem;
   font-weight: 700;
   margin-bottom: 1rem;
   color: var(--color-text);
 }
-
 .search-row {
   display: flex;
   gap: 0.75rem;
   justify-content: center;
   flex-wrap: wrap;
 }
-
 .match-input {
   background: var(--color-surface, #1a1f2b);
   border: 1px solid var(--color-border, #2e3542);
@@ -669,10 +638,10 @@ async function loadByMatchId() {
   font-size: 0.95rem;
   padding: 0.6rem 1rem;
   width: 300px;
+  max-width: 100%;
   outline: none;
 }
 .match-input:focus { border-color: var(--color-accent, #34bfff); }
-
 .load-btn {
   background: var(--color-accent, #34bfff);
   border: none;
@@ -686,31 +655,6 @@ async function loadByMatchId() {
 }
 .load-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .load-btn:hover:not(:disabled) { opacity: 0.85; }
-
-.load-btn.secondary {
-  background: transparent;
-  border: 1px solid var(--color-border, #2e3542);
-  color: var(--color-text);
-}
-.load-btn.secondary:hover:not(:disabled) {
-  border-color: var(--color-accent, #34bfff);
-  color: var(--color-accent, #34bfff);
-  opacity: 1;
-}
-
-.divider-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0.75rem 0 0.5rem;
-}
-.divider-text {
-  font-size: 0.75rem;
-  color: var(--color-muted, #7a8799);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
 .error-msg {
   color: #ff6b6b;
   margin-top: 0.75rem;
@@ -720,66 +664,23 @@ async function loadByMatchId() {
   margin-right: auto;
 }
 
-.match-info {
-  text-align: center;
-  margin-bottom: 1.5rem;
-}
-.match-summary {
-  margin: 0;
-  font-size: 1rem;
-  color: var(--color-text);
-}
-.match-id {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.match-note {
-  margin: 0.3rem 0 0;
-  font-size: 0.8rem;
-  color: var(--color-muted, #7a8799);
+.panel {
+  background: var(--color-surface, #1a1f2b);
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1.25rem;
 }
 
-.teams {
+/* Summary */
+.summary-top {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  column-gap: 1.5rem;
-  row-gap: 0.75rem;
-}
-
-.lane-row-label {
-  grid-column: 1 / -1;
-  display: flex;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--color-muted, #7a8799);
+  gap: 1rem;
 }
-.lane-row-label::before,
-.lane-row-label::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--color-border, #2e3542);
-}
-
-.card-radiant { border-left: 3px solid rgba(75,180,95,.6); }
-.card-dire    { border-left: 3px solid rgba(200,60,60,.6); }
-
-@media (max-width: 800px) {
-  .teams { grid-template-columns: minmax(0, 1fr); }
-  .team-heading { display: none; }
-  .player-card-spacer { display: none; }
-}
-
-.team-heading {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
+.team-side { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.team-side-right { justify-content: flex-end; }
 .team-label {
   font-size: 0.72rem;
   font-weight: 700;
@@ -787,24 +688,159 @@ async function loadByMatchId() {
   text-transform: uppercase;
   padding: 0.35rem 0.75rem;
   border-radius: 4px;
-  display: inline-block;
 }
+.radiant-label { background: rgba(75,180,95,.15); color: #4bb45f; border: 1px solid rgba(75,180,95,.3); }
+.dire-label    { background: rgba(200,60,60,.15);  color: #c83c3c; border: 1px solid rgba(200,60,60,.3); }
 .team-result {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  color: var(--color-text);
 }
-.radiant-label { background: rgba(75,180,95,.15); color: #4bb45f; border: 1px solid rgba(75,180,95,.3); }
-.dire-label    { background: rgba(200,60,60,.15);  color: #c83c3c; border: 1px solid rgba(200,60,60,.3); }
+.summary-center { text-align: center; }
+.score {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--color-text);
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+}
+.score-sep { color: var(--color-muted, #7a8799); }
+.summary-meta { font-size: 0.75rem; color: var(--color-muted, #7a8799); }
+.summary-meta strong { color: var(--color-text); font-variant-numeric: tabular-nums; }
 
+.view-toggle,
+.metric-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.view-toggle { display: flex; width: fit-content; margin: 1rem auto 0.75rem; }
+.view-toggle button,
+.metric-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--color-muted, #7a8799);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+.metric-toggle { margin-bottom: 0.5rem; }
+.metric-toggle button { font-size: 0.68rem; padding: 0.25rem 0.65rem; }
+.view-toggle button + button,
+.metric-toggle button + button { border-left: 1px solid var(--color-border, #2e3542); }
+.view-toggle button.active,
+.metric-toggle button.active { background: rgba(255,255,255,.1); color: #fff; }
+.view-toggle button:hover:not(.active),
+.metric-toggle button:hover:not(.active) { color: var(--color-text); }
 
+.summary-body {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.facts { margin: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.fact { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.78rem; }
+.fact dt { color: var(--color-muted, #7a8799); }
+.fact dd { margin: 0; color: var(--color-text); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.match-note {
+  margin: 0.9rem 0 0;
+  font-size: 0.7rem;
+  color: var(--color-muted, #7a8799);
+}
+
+/* Lanes */
+.lane-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+.lane-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.lane-roles { font-size: 0.72rem; color: var(--color-muted, #7a8799); }
+.lane-outcome {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+}
+.lane-radiant { color: #4bb45f; background: rgba(75,180,95,.12); border: 1px solid rgba(75,180,95,.3); }
+.lane-dire    { color: #c83c3c; background: rgba(200,60,60,.12); border: 1px solid rgba(200,60,60,.3); }
+.lane-neutral { color: var(--color-muted, #7a8799); background: var(--color-border, #2e3542); border: 1px solid transparent; }
+
+.lane-chart { margin-bottom: 1rem; }
+
+.lane-body {
+  --card-gap: 0.75rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "players";
+  gap: var(--card-gap);
+  align-items: start;
+}
+.lane-body.has-side {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  grid-template-areas: "players side";
+}
+.lane-side {
+  grid-area: side;
+  position: sticky;
+  top: calc(64px + 1rem);
+  background: #161a24;
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+}
+
+.lane-players {
+  grid-area: players;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--card-gap);
+  align-items: start;
+}
+
+/* Two player-card columns need ~1150px; below that the breakdown moves above them. */
+@media (max-width: 1600px) {
+  .lane-body.has-side {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "side" "players";
+  }
+  .lane-side { position: static; }
+}
+@media (max-width: 900px) {
+  .summary-body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 800px) {
+  .lane-players { grid-template-columns: minmax(0, 1fr); }
+  .player-card-spacer { display: none; }
+  .summary-top { grid-template-columns: 1fr; text-align: center; }
+  .team-side, .team-side-right { justify-content: center; }
+}
+
+/* Player cards */
 .player-card {
-  background: var(--color-surface, #1a1f2b);
+  background: #161a24;
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 8px;
   padding: 0.75rem;
+  min-width: 0;
 }
+.card-radiant { border-left: 3px solid rgba(75,180,95,.6); }
+.card-dire    { border-left: 3px solid rgba(200,60,60,.6); }
 
 .player-header {
   display: flex;
@@ -813,7 +849,6 @@ async function loadByMatchId() {
   margin-bottom: 0.5rem;
   padding-bottom: 0.6rem;
 }
-
 .avatar {
   align-self: center;
   width: 64px;
@@ -823,8 +858,6 @@ async function loadByMatchId() {
   flex-shrink: 0;
   background: var(--color-border, #2e3542);
 }
-
-
 .player-info {
   flex: 1;
   min-width: 0;
@@ -834,8 +867,9 @@ async function loadByMatchId() {
 }
 .name-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.3rem 0.4rem;
   min-width: 0;
 }
 .overall-wr {
@@ -843,6 +877,7 @@ async function loadByMatchId() {
   align-items: baseline;
   gap: 0.4rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .profile-links {
   align-self: flex-start;
@@ -858,22 +893,25 @@ async function loadByMatchId() {
   opacity: 0.85;
   transition: opacity 0.15s, transform 0.15s;
 }
-.profile-link:hover {
-  opacity: 1;
-  transform: scale(1.08);
-}
+.profile-link:hover { opacity: 1; transform: scale(1.08); }
 .profile-logo {
   display: block;
   width: 26px;
   height: 26px;
   border-radius: 50%;
 }
-
 .name-divider {
   width: 1px;
   height: 1rem;
   background: var(--color-border, #2e3542);
   flex-shrink: 0;
+}
+.name-main {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  max-width: 100%;
 }
 .player-name {
   min-width: 0;
@@ -884,101 +922,6 @@ async function loadByMatchId() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.section-loading {
-  font-size: 0.75rem;
-  color: var(--color-muted, #7a8799);
-  padding: 0.4rem 0;
-}
-
-.this-match-main {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-}
-.this-match-hero-icon {
-  width: 52px;
-  height: 29px;
-  border-radius: 3px;
-  object-fit: cover;
-  flex-shrink: 0;
-  background: var(--color-border, #2e3542);
-}
-.this-match-hero {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.this-match-hero-name {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.this-match-sub {
-  font-size: 0.7rem;
-  color: var(--color-muted, #7a8799);
-}
-
-.this-match-table {
-  margin-top: 0.5rem;
-  overflow-x: auto;
-}
-.tm-row {
-  display: grid;
-  grid-template-columns: 2.4rem 1.8rem minmax(3.6rem, 1fr) minmax(3rem, 1fr) minmax(4.4rem, 1fr) minmax(2.8rem, 1fr) minmax(2.8rem, 1fr);
-  column-gap: 0.5rem;
-  align-items: center;
-  padding: 0.18rem 0;
-  font-size: 0.78rem;
-  color: var(--color-text);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.tm-key {
-  font-size: 0.66rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-muted, #7a8799);
-}
-
-.this-match-hero-line {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-width: 0;
-}
-.lane-outcome {
-  display: inline-block;
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-size: 0.66rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.15rem 0.45rem;
-  border-radius: 3px;
-}
-.lane-win  { color: #4bb45f; background: rgba(75,180,95,.12); border: 1px solid rgba(75,180,95,.3); }
-.lane-loss { color: #c83c3c; background: rgba(200,60,60,.12); border: 1px solid rgba(200,60,60,.3); }
-.lane-even { color: var(--color-muted, #7a8799); background: var(--color-border, #2e3542); border: 1px solid transparent; }
-
-.private-profile {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-muted, #7a8799);
-  padding: 0.5rem 0 0.2rem;
-}
-
 .role-badge {
   flex-shrink: 0;
   white-space: nowrap;
@@ -994,6 +937,98 @@ async function loadByMatchId() {
   border: 1px solid rgba(52,191,255,.3);
 }
 
+.hero-line {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.hero-line-icon {
+  width: 52px;
+  height: 29px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--color-border, #2e3542);
+}
+.hero-line-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-line-pos {
+  font-size: 0.7rem;
+  color: var(--color-muted, #7a8799);
+  white-space: nowrap;
+}
+
+.this-match-table {
+  margin-top: 0.5rem;
+  overflow-x: auto;
+}
+.tm-row {
+  display: grid;
+  grid-template-columns: 2.4rem 1.8rem minmax(3.6rem, 1fr) minmax(3rem, 1fr) minmax(4.4rem, 1fr) minmax(2.8rem, 1fr) minmax(2.8rem, 1fr);
+  column-gap: 0.5rem;
+  align-items: center;
+  padding: 0.18rem 0;
+  font-size: 0.78rem;
+  color: var(--color-muted, #7a8799);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tm-row.tm-focus { color: var(--color-text); }
+.tm-key {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted, #7a8799);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.4rem 0.55rem;
+  background: transparent;
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 5px;
+  color: var(--color-muted, #7a8799);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.history-toggle:hover { color: var(--color-text); border-color: #3c4556; }
+.history-toggle svg { transition: transform 0.15s; }
+.history-toggle svg.open { transform: rotate(180deg); }
+.history { margin-top: 0.25rem; }
+
+.section-loading {
+  font-size: 0.75rem;
+  color: var(--color-muted, #7a8799);
+  padding: 0.4rem 0;
+}
+.private-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted, #7a8799);
+  padding: 0.5rem 0 0.2rem;
+}
+
 .section { margin-top: 0.6rem; }
 .section:not(:last-child) { padding-bottom: 0.6rem; }
 .section-label {
@@ -1007,7 +1042,7 @@ async function loadByMatchId() {
   line-height: 1.1;
   margin-bottom: 0.5rem;
 }
-
+.items-section { margin-top: 0.75rem; }
 .no-data {
   font-size: 0.75rem;
   color: var(--color-muted, #7a8799);
@@ -1016,14 +1051,19 @@ async function loadByMatchId() {
 .top-hero-row,
 .match-row {
   display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 1rem 4.6rem 4.6rem 3.2rem;
   align-items: center;
   column-gap: 0.6rem;
   padding: 0.18rem 0;
   font-variant-numeric: tabular-nums;
 }
-.top-hero-row,
-.match-row { grid-template-columns: 22px minmax(0, 1fr) 1rem 4.6rem 4.6rem 3.2rem; }
-
+@media (max-width: 520px) {
+  .top-hero-row,
+  .match-row { column-gap: 0.4rem; }
+  .top-hero-row { grid-template-columns: 22px minmax(0, 1fr) 4.2rem 2.6rem; }
+  .top-hero-row .spacer-cell { display: none; }
+  .match-row { grid-template-columns: 22px minmax(0, 1fr) 0.8rem 3.6rem 3.2rem 3.3rem; }
+}
 .top-hero-icon,
 .match-hero-icon {
   width: 22px;
@@ -1032,7 +1072,6 @@ async function loadByMatchId() {
   object-fit: cover;
   background: var(--color-border, #2e3542);
 }
-
 .top-hero-name,
 .match-hero-name {
   font-size: 0.78rem;
@@ -1041,26 +1080,19 @@ async function loadByMatchId() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .wr-good, .wr-bad { font-size: 0.76rem; font-weight: 700; }
 .wr-good { color: #4bb45f; }
 .wr-bad  { color: #c83c3c; }
 .record  { font-size: 0.72rem; color: var(--color-muted, #7a8799); }
-
 .match-result { font-size: 0.74rem; font-weight: 700; }
 .win  { color: #4bb45f; }
 .loss { color: #c83c3c; }
-
-.match-kda {
-  font-size: 0.74rem;
-  color: var(--color-text);
-}
+.match-kda { font-size: 0.74rem; color: var(--color-text); }
 .match-duration,
 .match-ago {
   font-size: 0.72rem;
   color: var(--color-muted, #7a8799);
 }
-
 .list-head,
 .tm-head {
   font-size: 0.6rem;
@@ -1089,8 +1121,8 @@ async function loadByMatchId() {
   transition: color 0.15s, border-color 0.15s;
 }
 .show-more-btn:hover:not(:disabled) {
-  color: var(--color-accent, #34bfff);
-  border-color: var(--color-accent, #34bfff);
+  color: #fff;
+  border-color: #5a6375;
 }
 .show-more-btn:disabled { opacity: 0.6; cursor: wait; }
 </style>

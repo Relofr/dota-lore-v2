@@ -121,6 +121,20 @@ export async function testLiveArgs() {
   }`)
 }
 
+let itemsPromise = null
+
+export function fetchItems() {
+  itemsPromise ??= stratzQuery(`{
+    constants { items { id shortName displayName stat { isRecipe } } }
+  }`)
+    .then(data => new Map(data.constants.items.map(i => [i.id, i])))
+    .catch(err => {
+      itemsPromise = null
+      throw err
+    })
+  return itemsPromise
+}
+
 export async function fetchMatchPlayers(matchId) {
   const data = await stratzQuery(`{
     match(id: ${matchId}) {
@@ -131,10 +145,27 @@ export async function fetchMatchPlayers(matchId) {
       topLaneOutcome
       midLaneOutcome
       bottomLaneOutcome
+      firstBloodTime
+      radiantNetworthLeads
+      radiantExperienceLeads
+      radiantKills
+      direKills
+      towerDeaths { time isRadiant }
       players {
         steamAccountId
+        playerSlot
         isRadiant
         heroId
+        item0Id
+        item1Id
+        item2Id
+        item3Id
+        item4Id
+        item5Id
+        backpack0Id
+        backpack1Id
+        backpack2Id
+        neutral0Id
         kills
         deaths
         assists
@@ -155,9 +186,10 @@ export async function fetchMatchPlayers(matchId) {
           networthPerMinute
           heroDamagePerMinute
           level
-          killEvents { time }
-          deathEvents { time }
+          killEvents { time target isSolo isGank }
+          deathEvents { time attacker goldFed timeDead }
           assistEvents { time }
+          itemPurchases { time itemId }
         }
         hero {
           displayName
