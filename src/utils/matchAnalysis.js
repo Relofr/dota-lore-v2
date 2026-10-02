@@ -132,6 +132,8 @@ export function laneLeads(group) {
     networth: lead(s => s.networthPerMinute),
     experience: lead(s => shifted(s.experiencePerMinute)),
     lastHits: lead(s => shifted(s.lastHitsPerMinute)),
+    heroDamage: lead(s => [0, ...(s.heroDamagePerMinute ?? [])]),
+    heroDamageTotal: lead(s => shifted(s.heroDamagePerMinute)),
   }
 }
 

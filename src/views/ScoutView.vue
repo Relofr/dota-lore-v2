@@ -35,6 +35,7 @@ const error = ref(null)
 const match = ref(null)
 const view = ref('laning')
 const teamMetric = ref('networth')
+const laneMetric = ref({})
 const itemMap = ref(new Map())
 const historyOpen = ref({})
 const playerData = ref({})
@@ -89,11 +90,40 @@ function windowed(values) {
   return view.value === 'laning' ? values.slice(0, LANE_MINUTE + 1) : values
 }
 
-function laneExtras(leads) {
-  return [
-    { label: 'XP lead', values: windowed(leads.experience) },
-    { label: 'Last hit lead', values: windowed(leads.lastHits) },
-  ]
+const LANE_METRICS = [
+  { key: 'networth', tab: 'Net worth' },
+  { key: 'experience', tab: 'Experience' },
+  { key: 'heroDamage', tab: 'Hero damage' },
+]
+
+function laneChart(group) {
+  const leads = group.leads
+  const metric = laneMetric.value[group.key] ?? 'networth'
+  if (metric === 'experience') {
+    return {
+      label: 'Lane experience lead',
+      values: windowed(leads.experience),
+      extras: [
+        { label: 'Net worth lead', values: windowed(leads.networth) },
+        { label: 'Last hit lead', values: windowed(leads.lastHits) },
+      ],
+    }
+  }
+  if (metric === 'heroDamage') {
+    return {
+      label: 'Hero damage per minute lead',
+      values: windowed(leads.heroDamage),
+      extras: [{ label: 'Total damage lead', values: windowed(leads.heroDamageTotal) }],
+    }
+  }
+  return {
+    label: 'Lane net worth lead',
+    values: windowed(leads.networth),
+    extras: [
+      { label: 'XP lead', values: windowed(leads.experience) },
+      { label: 'Last hit lead', values: windowed(leads.lastHits) },
+    ],
+  }
 }
 
 function positionText(p) {
@@ -419,10 +449,20 @@ async function loadByMatchId() {
         </header>
 
         <div v-if="group.leads" class="lane-chart">
+          <div class="metric-toggle" role="radiogroup" :aria-label="`${group.label} chart metric`">
+            <button
+              v-for="m in LANE_METRICS"
+              :key="m.key"
+              role="radio"
+              :aria-checked="(laneMetric[group.key] ?? 'networth') === m.key"
+              :class="{ active: (laneMetric[group.key] ?? 'networth') === m.key }"
+              @click="laneMetric[group.key] = m.key"
+            >{{ m.tab }}</button>
+          </div>
           <LeadChart
-            :values="windowed(group.leads.networth)"
-            :extras="laneExtras(group.leads)"
-            label="Lane net worth lead"
+            :values="laneChart(group).values"
+            :extras="laneChart(group).extras"
+            :label="laneChart(group).label"
             :height="170"
           />
         </div>
