@@ -1,7 +1,12 @@
 <script setup>
+import HeroIcon from './HeroIcon.vue'
+import LaneOutcome from './LaneOutcome.vue'
+
 defineProps({
   breakdown: { type: Object, required: true },
   minute: { type: Number, required: true },
+  // { text, side } from laneOutcomeText, shown as a badge beside the title.
+  outcome: { type: Object, default: null },
 })
 
 const NUMBER_PATTERN = /([+−]?\d+(?:[.:]\d+)?k?)/
@@ -21,7 +26,10 @@ function share(row) {
 
 <template>
   <div class="breakdown">
-    <div class="section-label">Lane breakdown · 0–{{ minute }} min</div>
+    <div class="breakdown-head">
+      <div class="section-label">Lane breakdown · 0–{{ minute }} min</div>
+      <LaneOutcome v-if="outcome" :outcome="outcome" />
+    </div>
 
     <p class="headline">
       <template v-for="(seg, i) in segments(breakdown.headline)" :key="i">
@@ -59,18 +67,23 @@ function share(row) {
     <ul v-if="breakdown.rotations.length" class="notes">
       <li v-for="rot in breakdown.rotations" :key="rot.victims">
         <span class="note-label">Ganked {{ rot.victims }}</span>
-        {{ rot.killers.map(k => k.count > 1 ? `${k.name} ×${k.count}` : k.name).join(', ') }}
+        <span v-for="k in rot.killers" :key="k.hero?.shortName" class="ganker">
+          <HeroIcon :hero="k.hero" class="note-hero" /><span v-if="k.count > 1" class="ganker-count">×{{ k.count }}</span>
+        </span>
       </li>
     </ul>
     </div>
 
-    <div v-if="breakdown.core" class="core">
-      <div class="core-title">
-        Core matchup
-        <span class="core-heroes">{{ breakdown.core.radiant }} <em>vs</em> {{ breakdown.core.dire }}</span>
-      </div>
-      <div class="compare">
-        <div v-for="row in breakdown.core.rows" :key="row.key" class="compare-row" role="row">
+    <div v-if="breakdown.matchups.length" class="matchups">
+    <div v-for="mu in breakdown.matchups" :key="mu.title" class="core">
+      <div class="core-title">{{ mu.title }}</div>
+      <div class="compare" role="table" :aria-label="mu.title">
+        <div class="compare-row compare-head" role="row">
+          <span role="columnheader" class="side side-r"><HeroIcon :hero="mu.radiant" class="hero-key hero-key-r" /></span>
+          <span role="columnheader" aria-hidden="true" />
+          <span role="columnheader" class="side side-d"><HeroIcon :hero="mu.dire" class="hero-key hero-key-d" /></span>
+        </div>
+        <div v-for="row in mu.rows" :key="row.key" class="compare-row" role="row">
           <span role="rowheader" class="metric">{{ row.label }}</span>
           <span role="cell" class="value value-r"><span :class="{ ahead: row.better === 'radiant' }">{{ row.rText }}</span></span>
           <span class="bar" aria-hidden="true">
@@ -80,6 +93,7 @@ function share(row) {
           <span role="cell" class="value value-d"><span :class="{ ahead: row.better === 'dire' }">{{ row.dText }}</span></span>
         </div>
       </div>
+    </div>
     </div>
     </div>
   </div>
@@ -101,12 +115,14 @@ function share(row) {
     gap: 2rem;
     align-items: start;
   }
-  .breakdown-body .core {
+  .breakdown-body .matchups {
+    padding-left: 2rem;
+    border-left: 1px solid var(--color-border, #2e3542);
+  }
+  .breakdown-body .core:first-child {
     margin-top: 0;
     padding-top: 0;
     border-top: none;
-    padding-left: 2rem;
-    border-left: 1px solid var(--color-border, #2e3542);
   }
 }
 
@@ -122,6 +138,15 @@ function share(row) {
   line-height: 1.1;
   margin-bottom: 0.6rem;
 }
+
+.breakdown-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.breakdown-head .section-label { margin-bottom: 0; }
 
 .headline {
   margin: 0 0 0.85rem;
@@ -228,7 +253,7 @@ function share(row) {
 }
 .core-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
   font-size: 0.62rem;
@@ -238,14 +263,15 @@ function share(row) {
   color: var(--color-muted, #7a8799);
   margin-bottom: 0.2rem;
 }
-.core-heroes {
-  font-size: 0.77rem;
-  font-weight: 600;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--color-text);
-}
-.core-heroes em { font-style: normal; color: var(--color-muted, #7a8799); }
+/* Hero icons stand in for the Radiant/Dire key; the underline keeps the side colour. */
+.hero-key { width: 22px; height: 22px; border-radius: 3px; }
+.hero-key-r { box-shadow: 0 2px 0 #45a957; }
+.hero-key-d { box-shadow: 0 2px 0 #c83c3c; }
+.notes li { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; }
+.note-label { margin-right: 0; }
+.ganker { display: inline-flex; align-items: center; gap: 0.2rem; }
+.note-hero { width: 20px; height: 20px; border-radius: 3px; }
+.ganker-count { font-size: 0.7rem; color: var(--color-muted, #7a8799); }
 
 @media (max-width: 520px) {
   .compare-row { grid-template-columns: minmax(0, 1fr) 3.8rem minmax(2.5rem, 4.5rem) 3.8rem; column-gap: 0.45rem; }

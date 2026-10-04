@@ -15,6 +15,7 @@ const route = useRoute()
       <nav class="main-nav">
         <RouterLink to="/" :class="{ active: route.path === '/' }">Home</RouterLink>
         <RouterLink to="/heroes" :class="{ active: route.path.startsWith('/heroes') }">Heroes</RouterLink>
+        <RouterLink to="/scout" :class="{ active: route.path.startsWith('/scout') }">Scout</RouterLink>
       </nav>
     </div>
   </header>

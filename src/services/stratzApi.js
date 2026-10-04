@@ -135,6 +135,24 @@ export function fetchItems() {
   return itemsPromise
 }
 
+// Event-level data for finer-than-a-minute charts; it covers the whole match (~2 MB), so it's loaded separately.
+export async function fetchMatchPlayback(matchId) {
+  const data = await stratzQuery(`{
+    match(id: ${matchId}) {
+      players {
+        playerSlot
+        playbackData {
+          playerUpdateGoldEvents { time networth }
+          experienceEvents { time amount }
+          heroDamageEvents { time value isTargetMainHero toIllusion }
+          csEvents { time }
+        }
+      }
+    }
+  }`)
+  return data.match?.players ?? []
+}
+
 export async function fetchMatchPlayers(matchId) {
   const data = await stratzQuery(`{
     match(id: ${matchId}) {

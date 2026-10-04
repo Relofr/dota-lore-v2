@@ -1,13 +1,23 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, useId } from 'vue'
-import { compact, signed } from '@/utils/matchAnalysis.js'
+import { compact, signed, formatTime } from '@/utils/matchAnalysis.js'
+import HeroIcon from './HeroIcon.vue'
 
 const props = defineProps({
   values: { type: Array, required: true },
   extras: { type: Array, default: () => [] },
   label: { type: String, required: true },
   height: { type: Number, default: 150 },
+  // Seconds between points; the x-axis is still labelled in whole minutes.
+  step: { type: Number, default: 60 },
+  // [{ key, hero, isRadiant, values }] — per-hero values listed in the tooltip under the lead.
+  heroes: { type: Array, default: () => [] },
 })
+
+const heroSides = computed(() => [
+  { key: 'radiant', label: 'Radiant', list: props.heroes.filter(h => h.isRadiant) },
+  { key: 'dire', label: 'Dire', list: props.heroes.filter(h => !h.isRadiant) },
+].filter(s => s.list.length))
 
 // Validated pair (dark surface #1a1f2b): CVD ΔE 8.3, every mark also carries a text label.
 const RADIANT = '#45a957'
@@ -55,11 +65,14 @@ const zeroY = computed(() => y(0))
 const linePath = computed(() => props.values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(''))
 const areaPath = computed(() => `${linePath.value}L${x(n.value - 1).toFixed(1)},${zeroY.value.toFixed(1)}L${x(0).toFixed(1)},${zeroY.value.toFixed(1)}Z`)
 
+const perMinute = computed(() => 60 / props.step)
+
+// Tick positions are point indexes; labels are minutes.
 const xTicks = computed(() => {
-  const last = n.value - 1
-  const step = last <= 12 ? (plotW.value < 360 ? 2 : 1) : last <= 30 ? 5 : 10
+  const lastMinute = Math.floor(((n.value - 1) * props.step) / 60)
+  const every = lastMinute <= 12 ? (plotW.value < 360 ? 2 : 1) : lastMinute <= 30 ? 5 : 10
   const ticks = []
-  for (let m = 0; m <= last; m += step) ticks.push(m)
+  for (let m = 0; m <= lastMinute; m += every) ticks.push({ i: m * perMinute.value, label: m })
   return ticks
 })
 
@@ -81,19 +94,21 @@ function onKey(e) {
   if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
   e.preventDefault()
   const start = hover.value ?? (e.key === 'ArrowLeft' ? n.value : -1)
-  hover.value = Math.max(0, Math.min(n.value - 1, start + (e.key === 'ArrowRight' ? 1 : -1)))
+  // Shift jumps a whole minute, which matters when points are seconds apart.
+  const by = e.shiftKey ? Math.max(1, perMinute.value) : 1
+  hover.value = Math.max(0, Math.min(n.value - 1, start + (e.key === 'ArrowRight' ? by : -by)))
 }
 
 const tooltipStyle = computed(() => {
   if (hover.value == null) return {}
   const px = x(hover.value)
-  const flip = px > width.value - 170
+  const flip = px > width.value - (props.heroes.length ? 260 : 170)
   return flip ? { right: `${width.value - px + 10}px` } : { left: `${px + 10}px` }
 })
 
 const summary = computed(() => {
   const end = props.values.at(-1) ?? 0
-  return `${props.label}: ${signed(end)} at ${n.value - 1}:00 (${sideOf(end)})`
+  return `${props.label}: ${signed(end)} at ${formatTime((n.value - 1) * props.step)} (${sideOf(end)})`
 })
 </script>
 
@@ -102,8 +117,8 @@ const summary = computed(() => {
     <div class="chart-head">
       <span class="chart-title">{{ label }}</span>
       <span class="legend">
-        <span class="key"><i :style="{ background: RADIANT }" />Radiant ahead</span>
-        <span class="key"><i :style="{ background: DIRE }" />Dire ahead</span>
+        <span class="key"><i :style="{ background: RADIANT }" />Radiant</span>
+        <span class="key"><i :style="{ background: DIRE }" />Dire</span>
       </span>
     </div>
     <div class="chart-body">
@@ -131,7 +146,7 @@ const summary = computed(() => {
           <text v-for="t in domain.ticks" :key="t" :x="PAD.l - 6" :y="y(t)" dy="0.32em" text-anchor="end">{{ compact(Math.abs(t)) }}</text>
         </g>
         <g class="x-ticks">
-          <text v-for="m in xTicks" :key="m" :x="x(m)" :y="height - 6" text-anchor="middle">{{ m }}</text>
+          <text v-for="t in xTicks" :key="t.i" :x="x(t.i)" :y="height - 6" text-anchor="middle">{{ t.label }}</text>
         </g>
 
         <path :d="areaPath" :fill="RADIANT" fill-opacity="0.12" :clip-path="`url(#${uid}-above)`" />
@@ -152,7 +167,7 @@ const summary = computed(() => {
       </svg>
 
       <div v-if="hover != null" class="tooltip" :style="tooltipStyle">
-        <div class="tt-time">{{ hover }}:00</div>
+        <div class="tt-time">{{ formatTime(hover * step) }}</div>
         <div class="tt-row">
           <i :style="{ background: values[hover] >= 0 ? RADIANT : DIRE }" />
           <strong>{{ compact(Math.abs(values[hover])) }}</strong>
@@ -162,6 +177,13 @@ const summary = computed(() => {
           <i :style="{ background: (ex.values[hover] ?? 0) >= 0 ? RADIANT : DIRE }" />
           <strong>{{ compact(Math.abs(ex.values[hover] ?? 0)) }}</strong>
           <span>{{ ex.label }} · {{ sideShort(ex.values[hover] ?? 0) }}</span>
+        </div>
+        <div v-for="side in heroSides" :key="side.key" class="tt-heroes">
+          <div class="tt-side">{{ side.label }}</div>
+          <div v-for="h in side.list" :key="h.key" class="tt-hero">
+            <HeroIcon :hero="h.hero" class="tt-hero-icon" />
+            <strong>{{ compact(h.values[hover] ?? 0) }}</strong>
+          </div>
         </div>
       </div>
     </div>
@@ -193,7 +215,14 @@ const summary = computed(() => {
   font-size: 0.66rem;
   color: var(--color-muted, #7a8799);
 }
-.key i, .tt-row i {
+/* Same square as the lane breakdown's key. */
+.key i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.tt-row i {
   display: inline-block;
   width: 12px;
   height: 2px;
@@ -246,6 +275,35 @@ const summary = computed(() => {
   font-size: 0.72rem;
   white-space: nowrap;
 }
+.tt-heroes {
+  margin-top: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid #2e3542;
+}
+.tt-side {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted, #7a8799);
+  margin-bottom: 0.15rem;
+}
+.tt-hero {
+  display: grid;
+  grid-template-columns: 20px auto;
+  align-items: center;
+  column-gap: 0.4rem;
+  font-size: 0.72rem;
+  padding: 0.08rem 0;
+  white-space: nowrap;
+}
+.tt-hero img {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+.tt-hero strong { color: var(--color-text); font-weight: 700; text-align: right; }
 .tt-row strong { color: var(--color-text); font-weight: 700; min-width: 3.2rem; }
 .tt-row span { color: var(--color-muted, #7a8799); }
 </style>
