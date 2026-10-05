@@ -1,3 +1,5 @@
+import { getStored, putStored } from './matchStore.js'
+
 const ENDPOINT = 'https://api.stratz.com/graphql'
 
 const HEROES_QUERY = `{
@@ -121,13 +123,62 @@ export async function testLiveArgs() {
   }`)
 }
 
+// Session cache of in-flight or settled requests, so revisiting a match or player (back button, history
+// links) doesn't hit the API again. Failures are dropped so they can be retried. `limit` evicts the oldest.
+function cache(limit = Infinity) {
+  const entries = new Map()
+  return (key, load) => {
+    if (entries.has(key)) {
+      const hit = entries.get(key)
+      entries.delete(key)
+      entries.set(key, hit)
+      return hit
+    }
+    const promise = load().catch(err => {
+      entries.delete(key)
+      throw err
+    })
+    entries.set(key, promise)
+    if (entries.size > limit) entries.delete(entries.keys().next().value)
+    return promise
+  }
+}
+
+const matchCache = cache(20)
+// Playback is ~2 MB per match, so keep only a few.
+const playbackCache = cache(3)
+const pageCache = cache()
+
+// Item constants barely change between patches, so they're kept in localStorage for a day.
+const ITEMS_KEY = 'stratz-items-v1'
+const ITEMS_TTL = 24 * 60 * 60 * 1000
 let itemsPromise = null
 
+function storedItems() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ITEMS_KEY))
+    if (saved && Date.now() - saved.at < ITEMS_TTL) return saved.items
+  } catch {
+    // Unreadable or blocked storage just means fetching again.
+  }
+  return null
+}
+
 export function fetchItems() {
+  const saved = storedItems()
+  if (saved) return Promise.resolve(new Map(saved.map(i => [i.id, i])))
   itemsPromise ??= stratzQuery(`{
     constants { items { id shortName displayName stat { isRecipe } } }
   }`)
-    .then(data => new Map(data.constants.items.map(i => [i.id, i])))
+    .then(data => {
+      const items = data.constants.items
+      try {
+        localStorage.setItem(ITEMS_KEY, JSON.stringify({ at: Date.now(), items }))
+      } catch {
+        // Storage full or blocked; the in-memory promise still covers this session.
+      }
+      return new Map(items.map(i => [i.id, i]))
+    })
     .catch(err => {
       itemsPromise = null
       throw err
@@ -135,8 +186,25 @@ export function fetchItems() {
   return itemsPromise
 }
 
+// A finished, parsed match never changes, so it's kept in the browser (see matchStore.js) and only fetched once.
+// `isComplete` guards against storing a match Stratz hasn't finished parsing, which would otherwise stick.
+async function storedOrFetched(kind, matchId, load, isComplete) {
+  const stored = await getStored(kind, matchId)
+  if (stored !== undefined) return stored
+  const fresh = await load()
+  if (isComplete(fresh)) putStored(kind, matchId, fresh)
+  return fresh
+}
+
+const parsedMatch = m => m?.didRadiantWin != null && !!m.players?.length && m.players.every(p => p.stats?.networthPerMinute?.length)
+const parsedPlayback = players => players.some(p => p.playbackData?.playerUpdateGoldEvents?.length)
+
 // Event-level data for finer-than-a-minute charts; it covers the whole match (~2 MB), so it's loaded separately.
-export async function fetchMatchPlayback(matchId) {
+export function fetchMatchPlayback(matchId) {
+  return playbackCache(String(matchId), () => storedOrFetched('playback', matchId, () => loadMatchPlayback(matchId), parsedPlayback))
+}
+
+async function loadMatchPlayback(matchId) {
   const data = await stratzQuery(`{
     match(id: ${matchId}) {
       players {
@@ -153,7 +221,11 @@ export async function fetchMatchPlayback(matchId) {
   return data.match?.players ?? []
 }
 
-export async function fetchMatchPlayers(matchId) {
+export function fetchMatchPlayers(matchId) {
+  return matchCache(String(matchId), () => storedOrFetched('match', matchId, () => loadMatchPlayers(matchId), parsedMatch))
+}
+
+async function loadMatchPlayers(matchId) {
   const data = await stratzQuery(`{
     match(id: ${matchId}) {
       id
@@ -260,7 +332,11 @@ export async function fetchLiveMatch(matchId) {
 
 const RANKED_LOBBY = 7
 
-export async function fetchPlayerMatches(steamAccountId, skip, take = 10) {
+export function fetchPlayerMatches(steamAccountId, skip, take = 10) {
+  return pageCache(`matches:${steamAccountId}:${skip}:${take}`, () => loadPlayerMatches(steamAccountId, skip, take))
+}
+
+async function loadPlayerMatches(steamAccountId, skip, take) {
   const data = await stratzQuery(`{
     player(steamAccountId: ${steamAccountId}) {
       matches(request: { take: ${take}, skip: ${skip}, lobbyTypeIds: [${RANKED_LOBBY}] }) {
@@ -299,7 +375,11 @@ const periodFields = id => `
           hero { displayName shortName }
         }`
 
-export async function fetchRankedPeriodPage(steamAccountId, skip) {
+export function fetchRankedPeriodPage(steamAccountId, skip) {
+  return pageCache(`period:${steamAccountId}:${skip}`, () => loadRankedPeriodPage(steamAccountId, skip))
+}
+
+async function loadRankedPeriodPage(steamAccountId, skip) {
   const data = await stratzQuery(`{
     player(steamAccountId: ${steamAccountId}) {
       matches(request: { startDateTime: ${threeMonthsAgo()}, take: ${PERIOD_PAGE_SIZE}, skip: ${skip}, lobbyTypeIds: [${RANKED_LOBBY}] }) {${periodFields(steamAccountId)}
@@ -309,7 +389,23 @@ export async function fetchRankedPeriodPage(steamAccountId, skip) {
   return data.player?.matches ?? []
 }
 
+// Per-player promises; the settled objects are shared with the page, so pages appended to them later stay cached.
+const playerCache = new Map()
+
+// One batched request covering only the players not already cached.
 export async function fetchPlayersData(steamAccountIds) {
+  const missing = steamAccountIds.filter(id => !playerCache.has(id))
+  if (missing.length) {
+    const batch = loadPlayersData(missing)
+    for (const id of missing) playerCache.set(id, batch.then(result => result[id]))
+    batch.catch(() => { for (const id of missing) playerCache.delete(id) })
+  }
+  const result = {}
+  await Promise.all(steamAccountIds.map(async id => { result[id] = await playerCache.get(id) }))
+  return result
+}
+
+async function loadPlayersData(steamAccountIds) {
   const since = threeMonthsAgo()
   const blocks = steamAccountIds.map(id => `
     p${id}: player(steamAccountId: ${id}) {

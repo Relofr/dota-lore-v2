@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   fetchPlayersData,
@@ -53,11 +53,20 @@ const periodLoading = ref({})
 const moreLoading = ref({})
 const noMoreMatches = ref({})
 
-onMounted(() => {
-  fetchItems()
-    .then(map => { itemMap.value = map })
-    .catch(err => console.error('[Scout] items:', err.message))
-})
+const itemsLoading = ref(false)
+
+// Item names and icons are only needed once a match is showing; fetchItems caches them for a day.
+async function loadItems() {
+  if (itemMap.value.size || itemsLoading.value) return
+  itemsLoading.value = true
+  try {
+    itemMap.value = await fetchItems()
+  } catch (err) {
+    console.error('[Scout] items:', err.message)
+  } finally {
+    itemsLoading.value = false
+  }
+}
 
 const players = computed(() => match.value?.players ?? [])
 
@@ -220,8 +229,16 @@ function playerItems(p) {
   return view.value === 'laning' ? laneItems(p) : finalItems(p)
 }
 
-function toggleHistory(key) {
+function toggleHistory(p) {
+  const key = cardKey(p)
   historyOpen.value[key] = !historyOpen.value[key]
+  if (historyOpen.value[key] && p.accountId) loadRestOfPeriod(p.accountId)
+}
+
+// Whether the 3-month record covers every game, or just the first page from the batched query.
+function periodComplete(accountId) {
+  const data = playerData.value[accountId]
+  return !data?.recentPeriod || data.periodComplete || data.recentPeriod.length < PERIOD_PAGE_SIZE
 }
 
 function cardKey(p) {
@@ -310,10 +327,11 @@ function timeAgo(unix) {
   return `${Math.floor(s / 86400)}d ago`
 }
 
-// The first page comes with the batched query; players at the page cap get the rest fetched one page at a time.
+// The first page comes with the batched query. Players at the page cap get the rest fetched one page at a
+// time, but only once their history is opened.
 async function loadRestOfPeriod(accountId) {
   const data = playerData.value[accountId]
-  if (!data?.recentPeriod || data.recentPeriod.length < PERIOD_PAGE_SIZE) return
+  if (periodComplete(accountId) || periodLoading.value[accountId]) return
   periodLoading.value[accountId] = true
   try {
     let page
@@ -321,6 +339,8 @@ async function loadRestOfPeriod(accountId) {
       page = await fetchRankedPeriodPage(accountId, data.recentPeriod.length)
       data.recentPeriod = [...data.recentPeriod, ...page]
     } while (page.length === PERIOD_PAGE_SIZE)
+    // Stored on the cached object, so reopening this player later doesn't page again.
+    data.periodComplete = true
   } catch (err) {
     console.error(`[Scout] 3-month matches ${accountId}:`, err.message)
   } finally {
@@ -340,7 +360,6 @@ async function loadAllPlayerData() {
   } finally {
     for (const id of ids) dataLoading.value[id] = false
   }
-  for (const id of ids) await loadRestOfPeriod(id)
 }
 
 async function showMoreMatches(accountId) {
@@ -423,6 +442,7 @@ async function loadByMatchId(mid) {
     }
     loadAllPlayerData()
     loadPlayback(data.id)
+    loadItems()
   } catch (err) {
     error.value = err.message
   } finally {
@@ -448,6 +468,34 @@ async function loadByMatchId(mid) {
       </div>
       <p v-if="error" class="error-msg">{{ error }}</p>
     </header>
+
+    <!-- Placeholder shaped like the summary and a lane while the match loads. -->
+    <div v-if="loading && !match" class="scout-skeleton" aria-busy="true" aria-label="Loading match">
+      <section class="panel summary">
+        <div class="skel-summary-top">
+          <span class="skel" style="width: 5rem; height: 1rem" />
+          <span class="skel" style="width: 6rem; height: 1.8rem" />
+          <span class="skel" style="width: 5rem; height: 1rem" />
+        </div>
+        <div class="skel-chips">
+          <span class="skel skel-chip" /><span class="skel skel-chip" />
+        </div>
+        <div class="summary-body">
+          <span class="skel" style="height: 220px" />
+          <span class="skel" style="height: 220px" />
+        </div>
+        <div class="lane-cards">
+          <span v-for="i in 3" :key="i" class="skel" style="height: 190px" />
+        </div>
+      </section>
+      <section v-for="i in 2" :key="i" class="panel lane-panel">
+        <span class="skel" style="width: 8rem; height: 1.1rem; margin-bottom: 0.9rem" />
+        <span class="skel" style="height: 170px; margin-bottom: 1rem" />
+        <div class="skel-cards">
+          <span v-for="j in 2" :key="j" class="skel" style="height: 150px" />
+        </div>
+      </section>
+    </div>
 
     <template v-if="match">
       <!-- Match summary -->
@@ -599,17 +647,26 @@ async function loadByMatchId(mid) {
                         />
                         <span class="player-name">{{ playerName(p) }}</span>
                       </span>
-                      <template v-if="!dataLoading[p.accountId] && playerRoles(p.accountId).length">
+                      <span v-if="dataLoading[p.accountId]" class="skel skel-roles" />
+                      <template v-else-if="playerRoles(p.accountId).length">
                         <span class="name-divider" aria-hidden="true" />
                         <span class="role-badges">
                           <span v-for="pos in playerRoles(p.accountId)" :key="pos" class="role-badge"><RoleIcon :position="pos" /></span>
                         </span>
                       </template>
                     </div>
-                    <div v-if="overallRecord(p)" class="overall-wr" title="Ranked win rate, last 3 months">
+                    <div v-if="dataLoading[p.accountId]" class="overall-wr">
+                      <span class="skel skel-line" style="width: 7.5rem" />
+                    </div>
+                    <div
+                      v-else-if="overallRecord(p)"
+                      class="overall-wr"
+                      :title="periodComplete(p.accountId) ? 'Ranked win rate, last 3 months' : 'Ranked win rate over the last 100 games; open Player history to count all of the last 3 months'"
+                    >
                       <span :class="overallRecord(p).rate >= 50 ? 'wr-good' : 'wr-bad'">{{ overallRecord(p).rate }}%</span>
                       <span class="record">{{ overallRecord(p).wins.toLocaleString() }}W · {{ overallRecord(p).losses.toLocaleString() }}L</span>
                       <span v-if="periodLoading[p.accountId]" class="record">counting…</span>
+                      <span v-else-if="!periodComplete(p.accountId)" class="record">· last 100</span>
                     </div>
                     <div v-else-if="playerData[p.accountId] && !isPrivate(p)" class="overall-wr">
                       <span class="record">No ranked games · 3 months</span>
@@ -664,7 +721,11 @@ async function loadByMatchId(mid) {
                     </div>
                   </div>
 
-                  <div v-if="itemMap.size && playerItems(p).length" class="section items-section">
+                  <div v-if="!itemMap.size && itemsLoading" class="section items-section">
+                    <span class="skel skel-line" style="width: 6rem; margin-bottom: 0.5rem" />
+                    <div class="skel-items"><span v-for="i in 6" :key="i" class="skel skel-item" /></div>
+                  </div>
+                  <div v-else-if="itemMap.size && playerItems(p).length" class="section items-section">
                     <div class="section-label">{{ view === 'laning' ? `Items by ${LANE_MINUTE}:00` : 'Final items' }}</div>
                     <ItemRow :items="playerItems(p)" :item-map="itemMap" />
                   </div>
@@ -673,7 +734,7 @@ async function loadByMatchId(mid) {
                 <button
                   class="history-toggle"
                   :aria-expanded="!!historyOpen[cardKey(p)]"
-                  @click="toggleHistory(cardKey(p))"
+                  @click="toggleHistory(p)"
                 >
                   <span>Player history</span>
                   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" :class="{ open: historyOpen[cardKey(p)] }">
@@ -682,7 +743,10 @@ async function loadByMatchId(mid) {
                 </button>
 
                 <div v-if="historyOpen[cardKey(p)]" class="history">
-                  <div v-if="dataLoading[p.accountId]" class="section-loading">Loading stats…</div>
+                  <div v-if="dataLoading[p.accountId]" class="section" aria-busy="true" aria-label="Loading player history">
+                    <span class="skel skel-line" style="width: 9rem; margin-bottom: 0.6rem" />
+                    <span v-for="i in 5" :key="i" class="skel skel-row" />
+                  </div>
                   <div v-else-if="isPrivate(p)" class="private-profile">
                     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
                       <path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9z"/>
@@ -692,6 +756,10 @@ async function loadByMatchId(mid) {
                   <template v-else>
                     <div class="section">
                       <div class="section-label">Top Ranked Heroes · 3 Months</div>
+                      <div v-if="periodLoading[p.accountId]" aria-busy="true" aria-label="Counting ranked games">
+                        <span v-for="i in 5" :key="i" class="skel skel-row" />
+                      </div>
+                      <template v-else>
                       <div v-if="!topHeroes(p.accountId).length" class="no-data">No data</div>
                       <div v-else class="top-hero-row list-head">
                         <span class="list-head-hero">Hero</span>
@@ -702,11 +770,13 @@ async function loadByMatchId(mid) {
                       </div>
                       <div v-for="h in topHeroes(p.accountId)" :key="h.heroId" class="top-hero-row">
                         <HeroIcon :hero="h.hero" class="top-hero-icon" />
+                        <span class="hero-name">{{ h.hero?.displayName ?? '—' }}</span>
                         <span class="spacer-cell" />
                         <span class="spacer-cell" />
                         <span class="record">{{ h.winCount }}W · {{ h.matchCount - h.winCount }}L</span>
                         <span :class="winRate(h) >= 50 ? 'wr-good' : 'wr-bad'">{{ winRate(h) }}%</span>
                       </div>
+                      </template>
                     </div>
 
                     <div class="section">
@@ -719,13 +789,20 @@ async function loadByMatchId(mid) {
                         <span>Length</span>
                         <span>When</span>
                       </div>
-                      <div v-for="m in recentMatches(p.accountId)" :key="m.id" class="match-row">
+                      <RouterLink
+                        v-for="m in recentMatches(p.accountId)"
+                        :key="m.id"
+                        :to="{ query: { ...route.query, match: String(m.id) } }"
+                        class="match-row match-link"
+                        :title="`Open match ${m.id}`"
+                      >
                         <HeroIcon :hero="m.players?.[0]?.hero" class="match-hero-icon" />
+                        <span class="hero-name">{{ m.players?.[0]?.hero?.displayName ?? '—' }}</span>
                         <span class="match-result" :class="matchWon(m) ? 'win' : 'loss'">{{ matchWon(m) ? 'W' : 'L' }}</span>
                         <span class="match-kda">{{ m.players?.[0]?.kills }}/{{ m.players?.[0]?.deaths }}/{{ m.players?.[0]?.assists }}</span>
                         <span class="match-duration">{{ formatTime(m.durationSeconds) }}</span>
                         <span class="match-ago">{{ timeAgo(m.startDateTime) }}</span>
-                      </div>
+                      </RouterLink>
                       <button
                         v-if="recentMatches(p.accountId).length >= 10 && !noMoreMatches[p.accountId]"
                         class="show-more-btn"
@@ -1171,6 +1248,34 @@ async function loadByMatchId(mid) {
 .history-toggle svg.open { transform: rotate(180deg); }
 .history { margin-top: 0.25rem; }
 
+/* Skeleton placeholders: a soft shimmer, held still for reduced-motion users. */
+.skel {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.09) 50%, rgba(255,255,255,.04) 75%);
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skel-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; }
+}
+.skel-line { height: 0.75rem; border-radius: 4px; }
+.skel-roles { display: inline-block; width: 52px; height: 24px; border-radius: 4px; }
+.skel-row { height: 22px; margin: 0.35rem 0; border-radius: 4px; }
+.skel-items { display: flex; gap: 0.3rem; }
+.skel-item { width: 32px; height: 24px; border-radius: 3px; }
+.skel-summary-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.skel-chips { display: flex; justify-content: center; gap: 0.35rem; margin: 1rem 0 0.75rem; }
+.skel-chip { width: 7rem; height: 1.7rem; border-radius: 999px; }
+.skel-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+@media (max-width: 800px) {
+  .skel-cards { grid-template-columns: minmax(0, 1fr); }
+}
+
 .section-loading {
   font-size: 0.75rem;
   color: var(--color-muted, #7a8799);
@@ -1225,13 +1330,30 @@ async function loadByMatchId(mid) {
 }
 .top-hero-icon,
 .match-hero-icon {
-  /* Takes the old name column too, so rows still line up with their headers. */
-  grid-column: span 2;
-  justify-self: start;
   width: 22px;
   height: 22px;
   border-radius: 3px;
 }
+.hero-name {
+  font-size: 0.78rem;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Each recent match opens in the scout. */
+.match-link {
+  color: inherit;
+  text-decoration: none;
+  margin: 0 -0.4rem;
+  padding-left: 0.4rem;
+  padding-right: 0.4rem;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.match-link:hover { background: rgba(52,191,255,.08); }
+.match-link:hover .hero-name { color: #34bfff; }
+.match-link:focus-visible { outline: 2px solid #34bfff; outline-offset: -2px; }
 .wr-good, .wr-bad { font-size: 0.76rem; font-weight: 700; }
 .wr-good { color: #4bb45f; }
 .wr-bad  { color: #c83c3c; }
