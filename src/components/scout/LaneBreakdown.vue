@@ -79,9 +79,9 @@ function share(row) {
       <div class="core-title">{{ mu.title }}</div>
       <div class="compare" role="table" :aria-label="mu.title">
         <div class="compare-row compare-head" role="row">
-          <span role="columnheader" class="side side-r"><HeroIcon :hero="mu.radiant" class="hero-key hero-key-r" /></span>
+          <span role="columnheader" class="side side-r"><HeroIcon :hero="mu.radiant" class="hero-key" /></span>
           <span role="columnheader" aria-hidden="true" />
-          <span role="columnheader" class="side side-d"><HeroIcon :hero="mu.dire" class="hero-key hero-key-d" /></span>
+          <span role="columnheader" class="side side-d"><HeroIcon :hero="mu.dire" class="hero-key" /></span>
         </div>
         <div v-for="row in mu.rows" :key="row.key" class="compare-row" role="row">
           <span role="rowheader" class="metric">{{ row.label }}</span>
@@ -263,10 +263,8 @@ function share(row) {
   color: var(--color-muted, #7a8799);
   margin-bottom: 0.2rem;
 }
-/* Hero icons stand in for the Radiant/Dire key; the underline keeps the side colour. */
+/* Hero icons stand in for the Radiant/Dire key. */
 .hero-key { width: 22px; height: 22px; border-radius: 3px; }
-.hero-key-r { box-shadow: 0 2px 0 #45a957; }
-.hero-key-d { box-shadow: 0 2px 0 #c83c3c; }
 .notes li { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; }
 .note-label { margin-right: 0; }
 .ganker { display: inline-flex; align-items: center; gap: 0.2rem; }

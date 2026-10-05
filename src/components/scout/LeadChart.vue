@@ -8,6 +8,8 @@ const props = defineProps({
   extras: { type: Array, default: () => [] },
   label: { type: String, required: true },
   height: { type: Number, default: 150 },
+  // Grow to fill the parent's height (never below `height`), e.g. to match a neighbouring panel.
+  fill: { type: Boolean, default: false },
   // Seconds between points; the x-axis is still labelled in whole minutes.
   step: { type: Number, default: 60 },
   // [{ key, hero, isRadiant, values }] — per-hero values listed in the tooltip under the lead.
@@ -26,19 +28,31 @@ const PAD = { l: 40, r: 12, t: 10, b: 22 }
 
 const uid = useId()
 const root = ref(null)
+const body = ref(null)
+const bodyHeight = ref(0)
 const width = ref(560)
 const hover = ref(null)
 let observer
+let bodyObserver
 
 onMounted(() => {
   observer = new ResizeObserver(([entry]) => { width.value = Math.max(240, entry.contentRect.width) })
   observer.observe(root.value)
+  if (props.fill) {
+    bodyObserver = new ResizeObserver(([entry]) => { bodyHeight.value = entry.contentRect.height })
+    bodyObserver.observe(body.value)
+  }
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  bodyObserver?.disconnect()
+})
+
+const h = computed(() => (props.fill ? Math.max(props.height, Math.floor(bodyHeight.value)) : props.height))
 
 const n = computed(() => props.values.length)
 const plotW = computed(() => width.value - PAD.l - PAD.r)
-const plotH = computed(() => props.height - PAD.t - PAD.b)
+const plotH = computed(() => h.value - PAD.t - PAD.b)
 
 function niceStep(range, count) {
   const raw = range / count
@@ -113,7 +127,7 @@ const summary = computed(() => {
 </script>
 
 <template>
-  <div ref="root" class="lead-chart">
+  <div ref="root" class="lead-chart" :class="{ fill }">
     <div class="chart-head">
       <span class="chart-title">{{ label }}</span>
       <span class="legend">
@@ -121,10 +135,10 @@ const summary = computed(() => {
         <span class="key"><i :style="{ background: DIRE }" />Dire</span>
       </span>
     </div>
-    <div class="chart-body">
+    <div ref="body" class="chart-body" :style="fill ? { minHeight: `${height}px` } : null">
       <svg
         :width="width"
-        :height="height"
+        :height="h"
         role="img"
         :aria-label="summary"
         tabindex="0"
@@ -136,7 +150,7 @@ const summary = computed(() => {
       >
         <defs>
           <clipPath :id="`${uid}-above`"><rect :x="0" :y="0" :width="width" :height="zeroY" /></clipPath>
-          <clipPath :id="`${uid}-below`"><rect :x="0" :y="zeroY" :width="width" :height="height" /></clipPath>
+          <clipPath :id="`${uid}-below`"><rect :x="0" :y="zeroY" :width="width" :height="h" /></clipPath>
         </defs>
 
         <g class="grid">
@@ -146,7 +160,7 @@ const summary = computed(() => {
           <text v-for="t in domain.ticks" :key="t" :x="PAD.l - 6" :y="y(t)" dy="0.32em" text-anchor="end">{{ compact(Math.abs(t)) }}</text>
         </g>
         <g class="x-ticks">
-          <text v-for="t in xTicks" :key="t.i" :x="x(t.i)" :y="height - 6" text-anchor="middle">{{ t.label }}</text>
+          <text v-for="t in xTicks" :key="t.i" :x="x(t.i)" :y="h - 6" text-anchor="middle">{{ t.label }}</text>
         </g>
 
         <path :d="areaPath" :fill="RADIANT" fill-opacity="0.12" :clip-path="`url(#${uid}-above)`" />
@@ -155,7 +169,7 @@ const summary = computed(() => {
         <path :d="linePath" fill="none" :stroke="DIRE" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" :clip-path="`url(#${uid}-below)`" />
 
         <g v-if="hover != null">
-          <line class="crosshair" :x1="x(hover)" :x2="x(hover)" :y1="PAD.t" :y2="height - PAD.b" />
+          <line class="crosshair" :x1="x(hover)" :x2="x(hover)" :y1="PAD.t" :y2="h - PAD.b" />
           <circle
             :cx="x(hover)"
             :cy="y(values[hover])"
@@ -230,6 +244,10 @@ const summary = computed(() => {
 }
 
 .chart-body { position: relative; }
+/* In fill mode the body takes the spare height and the SVG is sized from it, so it can't push back. */
+.lead-chart.fill { display: flex; flex-direction: column; height: 100%; }
+.lead-chart.fill .chart-body { flex: 1; }
+.lead-chart.fill .chart-svg { position: absolute; top: 0; left: 0; }
 .chart-svg { display: block; max-width: 100%; outline: none; touch-action: pan-y; }
 .chart-svg:focus-visible { outline: 1px solid var(--color-accent, #34bfff); outline-offset: 2px; border-radius: 4px; }
 

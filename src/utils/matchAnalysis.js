@@ -326,11 +326,68 @@ export function laneBreakdown(group, allPlayers, outcome, minute = LANE_MINUTE) 
   return { headline: laneHeadline(outcome, rows), rows, rotations, matchups }
 }
 
+// Who drew first blood and on whom. Stratz gives only the time, so take the hero death nearest it;
+// deaths to creeps or neutrals before then would otherwise be picked up.
+export function firstBlood(match) {
+  if (match?.firstBloodTime == null) return null
+  const players = match.players ?? []
+  const byHeroId = new Map(players.map(p => [p.heroId, p]))
+  let best = null
+  for (const p of players) {
+    for (const d of p.thisMatch?.stats?.deathEvents ?? []) {
+      const gap = Math.abs(d.time - match.firstBloodTime)
+      if (!best || gap < best.gap) best = { gap, victim: p, killer: byHeroId.get(d.attacker) }
+    }
+  }
+  if (!best || best.gap > 5) return null
+  return {
+    time: match.firstBloodTime,
+    victim: best.victim.thisMatch?.hero,
+    victimRadiant: best.victim.isRadiant,
+    killer: best.killer?.thisMatch?.hero ?? null,
+  }
+}
+
 function leadSideText(lead) {
   if (!lead) return 'even'
   return `${sideName(lead > 0)} +${compact(Math.abs(lead))}`
 }
 
+function leadSide(lead) {
+  if (!lead) return null
+  return lead > 0 ? 'radiant' : 'dire'
+}
+
+// Radiant and Dire numbers side by side, each in its side's colour.
+function versus(r, d) {
+  return [{ text: String(r), side: 'radiant' }, { text: '–' }, { text: String(d), side: 'dire' }]
+}
+
+const TOP_PERFORMERS = [
+  { key: 'kills', label: 'Most kills', format: String },
+  { key: 'networth', label: 'Highest net worth', format: compact },
+  { key: 'heroDamage', label: 'Most hero damage', format: compact },
+]
+
+// The best player for each stat, by the laning cutoff or over the whole game.
+function topPerformers(players, minute) {
+  const value = (p, key) => (minute == null ? p.thisMatch?.[key] : statsAt(p.thisMatch, minute)?.[key]) ?? 0
+  const facts = []
+  for (const stat of TOP_PERFORMERS) {
+    const best = players.reduce((top, p) => (!top || value(p, stat.key) > value(top, stat.key) ? p : top), null)
+    if (!best || !value(best, stat.key)) continue
+    facts.push({
+      label: stat.label,
+      value: stat.format(value(best, stat.key)),
+      side: best.isRadiant ? 'radiant' : 'dire',
+      hero: best.thisMatch?.hero,
+    })
+  }
+  return facts
+}
+
+// Each fact is { label, value } plus optionally `side` (whose favour the value is in), `parts`
+// (coloured pieces shown instead of value), `hero` (shown before the value) or `firstBlood`.
 export function gameFacts(match, view, minute = LANE_MINUTE) {
   if (!match) return []
   const facts = []
@@ -338,45 +395,52 @@ export function gameFacts(match, view, minute = LANE_MINUTE) {
   const xp = match.radiantExperienceLeads ?? []
   const killsR = match.radiantKills ?? []
   const killsD = match.direKills ?? []
+  const total = arr => arr.reduce((a, b) => a + b, 0)
 
   if (view === 'laning') {
-    if (nw.length > minute) facts.push({ label: `Net worth at ${minute}:00`, value: leadSideText(nw[minute]) })
-    if (xp.length > minute) facts.push({ label: `XP at ${minute}:00`, value: leadSideText(xp[minute]) })
-    if (killsR.length) {
-      facts.push({ label: `Kills by ${minute}:00`, value: `${sumFirst(killsR, minute)} – ${sumFirst(killsD, minute)}` })
+    if (nw.length > minute) {
+      facts.push({ label: `Net worth at ${minute}:00`, value: leadSideText(nw[minute]), side: leadSide(nw[minute]) })
     }
-    if (match.firstBloodTime != null) facts.push({ label: 'First blood', value: formatTime(match.firstBloodTime) })
+    if (xp.length > minute) {
+      facts.push({ label: `XP at ${minute}:00`, value: leadSideText(xp[minute]), side: leadSide(xp[minute]) })
+    }
+    if (killsR.length) {
+      facts.push({ label: `Kills by ${minute}:00`, parts: versus(sumFirst(killsR, minute), sumFirst(killsD, minute)) })
+    }
+    if (match.firstBloodTime != null) {
+      facts.push({ label: 'First blood', value: formatTime(match.firstBloodTime), firstBlood: firstBlood(match) })
+    }
     const outcomes = Object.values(match.laneOutcomes ?? {}).filter(Boolean)
     if (outcomes.length) {
       const won = side => outcomes.filter(o => o.startsWith(side)).length
-      facts.push({ label: 'Lanes won', value: `Radiant ${won('RADIANT')} · Dire ${won('DIRE')} · Even ${outcomes.filter(o => o === 'TIE').length}` })
+      const ties = outcomes.filter(o => o === 'TIE').length
+      facts.push({
+        label: 'Lanes won',
+        parts: [...versus(won('RADIANT'), won('DIRE')), ...(ties ? [{ text: `· ${plural(ties, 'even')}` }] : [])],
+      })
     }
+    if (hasTimelines(match.players ?? [])) facts.push(...topPerformers(match.players, minute))
     return facts
   }
 
   if (match.didRadiantWin != null) {
-    facts.push({ label: 'Result', value: `${sideName(match.didRadiantWin)} victory in ${formatTime(match.durationSeconds)}` })
+    facts.push({
+      label: 'Result',
+      value: `${sideName(match.didRadiantWin)} victory in ${formatTime(match.durationSeconds)}`,
+      side: match.didRadiantWin ? 'radiant' : 'dire',
+    })
   }
-  if (killsR.length) {
-    facts.push({ label: 'Final kills', value: `${killsR.reduce((a, b) => a + b, 0)} – ${killsD.reduce((a, b) => a + b, 0)}` })
-  }
+  if (killsR.length) facts.push({ label: 'Final kills', parts: versus(total(killsR), total(killsD)) })
   if (nw.length) {
     const maxR = Math.max(0, ...nw)
     const maxD = Math.min(0, ...nw)
-    if (maxR > 0) facts.push({ label: 'Biggest Radiant lead', value: `+${compact(maxR)} at ${nw.indexOf(maxR)}:00` })
-    if (maxD < 0) facts.push({ label: 'Biggest Dire lead', value: `+${compact(-maxD)} at ${nw.indexOf(maxD)}:00` })
-    let swaps = 0
-    let prev = 0
-    for (const v of nw) {
-      const sign = Math.sign(v)
-      if (sign && prev && sign !== prev) swaps++
-      if (sign) prev = sign
-    }
-    facts.push({ label: 'Lead changes', value: String(swaps) })
+    if (maxR > 0) facts.push({ label: 'Biggest Radiant net worth lead', value: `+${compact(maxR)} at ${nw.indexOf(maxR)}:00`, side: 'radiant' })
+    if (maxD < 0) facts.push({ label: 'Biggest Dire net worth lead', value: `+${compact(-maxD)} at ${nw.indexOf(maxD)}:00`, side: 'dire' })
   }
   const firstBuilding = [...(match.towerDeaths ?? [])].sort((a, b) => a.time - b.time)[0]
   if (firstBuilding) {
     facts.push({ label: 'First building', value: `${sideName(firstBuilding.isRadiant)} lost one at ${formatTime(firstBuilding.time)}` })
   }
+  facts.push(...topPerformers((match.players ?? []).filter(p => p.thisMatch), null))
   return facts
 }

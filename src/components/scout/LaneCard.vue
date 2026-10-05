@@ -4,9 +4,11 @@ import HeroIcon from './HeroIcon.vue'
 import LaneOutcome from './LaneOutcome.vue'
 
 const props = defineProps({
-  // A laneGroups entry: { key, label, outcome, radiant, dire, breakdown }.
+  // A laneGroups entry: { key, label, outcome, radiant, dire }.
   group: { type: Object, required: true },
-  minute: { type: Number, required: true },
+  // compareRow entries from laneBreakdown, at whichever point in the game is being shown.
+  stats: { type: Array, default: () => [] },
+  statsLabel: { type: String, required: true },
 })
 defineEmits(['select'])
 
@@ -14,13 +16,11 @@ const STATS = [
   { key: 'networth', label: 'Net worth' },
   { key: 'lastHits', label: 'Last hits' },
   { key: 'xp', label: 'Experience' },
+  { key: 'heroDamage', label: 'Hero damage' },
   { key: 'deaths', label: 'Deaths' },
 ]
 
-const stats = computed(() => {
-  const rows = props.group.breakdown?.rows ?? []
-  return STATS.map(s => rows.find(r => r.key === s.key)).filter(Boolean)
-})
+const rows = computed(() => STATS.map(s => props.stats.find(r => r.key === s.key)).filter(Boolean))
 
 // Same split as the lane breakdown: the longer bright segment marks the side that did better.
 function share(row) {
@@ -39,17 +39,17 @@ function share(row) {
 
     <span class="card-heroes">
       <span class="heroes heroes-r">
-        <HeroIcon v-for="p in group.radiant" :key="p.thisMatch?.playerSlot" :hero="p.thisMatch?.hero" class="card-hero card-hero-r" />
+        <HeroIcon v-for="p in group.radiant" :key="p.thisMatch?.playerSlot" :hero="p.thisMatch?.hero" class="card-hero" />
       </span>
       <em>vs</em>
       <span class="heroes heroes-d">
-        <HeroIcon v-for="p in group.dire" :key="p.thisMatch?.playerSlot" :hero="p.thisMatch?.hero" class="card-hero card-hero-d" />
+        <HeroIcon v-for="p in group.dire" :key="p.thisMatch?.playerSlot" :hero="p.thisMatch?.hero" class="card-hero" />
       </span>
     </span>
 
-    <span v-if="stats.length" class="card-stats">
-      <span class="stats-label">At {{ minute }}:00</span>
-      <span v-for="row in stats" :key="row.key" class="stat">
+    <span v-if="rows.length" class="card-stats">
+      <span class="stats-label">{{ statsLabel }}</span>
+      <span v-for="row in rows" :key="row.key" class="stat">
         <span class="stat-label">{{ row.label }}</span>
         <span class="stat-value stat-r" :class="{ ahead: row.better === 'radiant' }">{{ row.rText }}</span>
         <span class="bar" aria-hidden="true">
@@ -106,9 +106,6 @@ function share(row) {
 .heroes { display: flex; gap: 0.25rem; flex: 1; }
 .heroes-r { justify-content: flex-end; }
 .card-hero { width: 26px; height: 26px; border-radius: 3px; }
-/* Side colour underline, as in the matchup keys. */
-.card-hero-r { box-shadow: 0 2px 0 #45a957; }
-.card-hero-d { box-shadow: 0 2px 0 #c83c3c; }
 
 .card-stats { display: flex; flex-direction: column; gap: 0.3rem; }
 .stats-label {

@@ -87,22 +87,40 @@ const laneGroups = computed(() => groupByLane(players.value).map(group => {
 
 const facts = computed(() => gameFacts(match.value, view.value))
 
-// The three real lanes get a summary card; roamers only appear in the panels below.
-const laneCards = computed(() => laneGroups.value.filter(g => g.key !== 'other'))
+// The three real lanes get a summary card; roamers only appear in the panels below. Full game swaps
+// the 10:00 numbers for end-of-game totals.
+const laneCards = computed(() => {
+  const endMinute = Math.ceil((match.value?.durationSeconds ?? 0) / 60)
+  const full = view.value === 'full' && endMinute > 0
+  return laneGroups.value.filter(g => g.key !== 'other').map(g => ({
+    ...g,
+    stats: full ? laneBreakdown(g, players.value, g.outcome, endMinute)?.rows : g.breakdown?.rows,
+    statsLabel: full ? 'End of game' : `At ${LANE_MINUTE}:00`,
+  }))
+})
 
 function scrollToLane(key) {
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   document.getElementById(`lane-${key}`)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 
+const TEAM_METRICS = [
+  { key: 'networth', tab: 'Net worth', label: 'Team net worth lead' },
+  { key: 'experience', tab: 'Experience', label: 'Team experience lead' },
+  { key: 'heroDamage', tab: 'Hero damage', label: 'Team hero damage lead' },
+]
+
 const teamSeries = computed(() => {
   const m = match.value
   if (!m) return null
-  if (fine.value) {
+  const metric = teamMetric.value
+  // Stratz has team-level leads for net worth and XP only; damage is summed from the players.
+  if (fine.value || metric === 'heroDamage') {
     const leads = leadSeries(players.value.filter(p => p.isRadiant), players.value.filter(p => !p.isRadiant), fine.value)
-    if (leads) return { values: windowed(leads[teamMetric.value], leads.step), step: leads.step }
+    if (leads) return { values: windowed(leads[metric], leads.step), step: leads.step }
+    if (metric === 'heroDamage') return null
   }
-  const source = teamMetric.value === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
+  const source = metric === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
   if (!source?.length) return null
   return { values: windowed(source), step: 60 }
 })
@@ -446,7 +464,7 @@ async function loadByMatchId(mid) {
               <span>{{ teamKills.dire }}</span>
             </div>
             <div class="summary-meta">
-              Match <strong>{{ match.matchId }}</strong> · {{ formatTime(match.durationSeconds) }}
+              {{ formatTime(match.durationSeconds) }}
             </div>
           </div>
           <div class="team-side team-side-right">
@@ -474,38 +492,52 @@ async function loadByMatchId(mid) {
           <div v-if="teamSeries" class="summary-chart">
             <div class="chips" role="radiogroup" aria-label="Team lead metric">
               <button
+                v-for="tm in TEAM_METRICS"
+                :key="tm.key"
                 role="radio"
-                :aria-checked="teamMetric === 'networth'"
-                :class="{ active: teamMetric === 'networth' }"
-                @click="teamMetric = 'networth'"
-              >Net worth</button>
-              <button
-                role="radio"
-                :aria-checked="teamMetric === 'experience'"
-                :class="{ active: teamMetric === 'experience' }"
-                @click="teamMetric = 'experience'"
-              >Experience</button>
+                :aria-checked="teamMetric === tm.key"
+                :class="{ active: teamMetric === tm.key }"
+                @click="teamMetric = tm.key"
+              >{{ tm.tab }}</button>
             </div>
             <LeadChart
               :values="teamSeries.values"
               :step="teamSeries.step"
-              :label="teamMetric === 'networth' ? 'Team net worth lead' : 'Team experience lead'"
+              :label="TEAM_METRICS.find(tm => tm.key === teamMetric).label"
               :height="170"
+              fill
             />
           </div>
-          <dl class="facts">
-            <div v-for="f in facts" :key="f.label" class="fact">
-              <dt>{{ f.label }}</dt>
-              <dd>{{ f.value }}</dd>
-            </div>
-          </dl>
+          <div v-if="facts.length" class="facts-card">
+            <div class="section-label">{{ view === 'laning' ? `Laning · 0–${LANE_MINUTE} min` : 'Match' }}</div>
+            <dl class="facts">
+              <div v-for="f in facts" :key="f.label" class="fact">
+                <dt>{{ f.label }}</dt>
+                <dd v-if="f.firstBlood">
+                  <HeroIcon v-if="f.firstBlood.killer" :hero="f.firstBlood.killer" class="fact-hero" />
+                  <span class="fb-verb">{{ f.firstBlood.killer ? 'killed' : 'died' }}</span>
+                  <HeroIcon :hero="f.firstBlood.victim" class="fact-hero" />
+                  <span class="fb-time">{{ f.value }}</span>
+                </dd>
+                <dd v-else-if="f.parts">
+                  <span v-for="(part, i) in f.parts" :key="i" :class="part.side ? `side-${part.side}` : 'fact-sep'">{{ part.text }}</span>
+                </dd>
+                <dd v-else-if="f.hero">
+                  <HeroIcon :hero="f.hero" class="fact-hero" />
+                  <span :class="f.side && `side-${f.side}`">{{ f.value }}</span>
+                </dd>
+                <dd v-else :class="f.side && `side-${f.side}`">{{ f.value }}</dd>
+              </div>
+            </dl>
+          </div>
         </div>
         <div v-if="laneCards.length" class="lane-cards">
           <LaneCard
             v-for="group in laneCards"
             :key="group.key"
             :group="group"
-            :minute="LANE_MINUTE"
+            :stats="group.stats ?? []"
+            :stats-label="group.statsLabel"
             @select="scrollToLane"
           />
         </div>
@@ -569,7 +601,9 @@ async function loadByMatchId(mid) {
                       </span>
                       <template v-if="!dataLoading[p.accountId] && playerRoles(p.accountId).length">
                         <span class="name-divider" aria-hidden="true" />
-                        <span v-for="pos in playerRoles(p.accountId)" :key="pos" class="role-badge"><RoleIcon :position="pos" /></span>
+                        <span class="role-badges">
+                          <span v-for="pos in playerRoles(p.accountId)" :key="pos" class="role-badge"><RoleIcon :position="pos" /></span>
+                        </span>
                       </template>
                     </div>
                     <div v-if="overallRecord(p)" class="overall-wr" title="Ranked win rate, last 3 months">
@@ -841,12 +875,46 @@ async function loadByMatchId(mid) {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
   gap: 1.25rem;
-  align-items: start;
+  align-items: stretch;
 }
-.facts { margin: 0; display: flex; flex-direction: column; gap: 0.45rem; }
-.fact { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.78rem; }
-.fact dt { color: var(--color-muted, #7a8799); }
-.fact dd { margin: 0; color: var(--color-text); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+/* The chart grows to the facts card's height. */
+.summary-chart { display: flex; flex-direction: column; min-width: 0; }
+.summary-chart .lead-chart { flex: 1; }
+/* Framed like the lane cards, with rows styled after the lane breakdown table. */
+.facts-card {
+  padding: 0.75rem 0.85rem;
+  background: rgba(255,255,255,.02);
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 8px;
+}
+.facts { margin: 0; display: flex; flex-direction: column; }
+.fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 1.9rem;
+  padding: 0.3rem 0;
+}
+.fact + .fact { border-top: 1px solid var(--color-border, #2e3542); }
+.fact dt { font-size: 0.73rem; color: var(--color-muted, #7a8799); }
+.fact dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.side-radiant { color: #4bb45f; }
+.side-dire { color: #c83c3c; }
+.fact-sep { color: var(--color-muted, #7a8799); font-weight: 500; }
+.fact-hero { width: 20px; height: 20px; border-radius: 3px; }
+.fb-verb { font-size: 0.7rem; font-weight: 500; color: var(--color-muted, #7a8799); }
+.fb-time { margin-left: 0.2rem; }
 .lane-cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1021,13 +1089,19 @@ async function loadByMatchId(mid) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Own wrapper so the name row's gap doesn't space the badges apart. */
+.role-badges { display: inline-flex; align-items: center; gap: .2em; flex-shrink: 0; }
 .role-badge {
   flex-shrink: 0;
   white-space: nowrap;
   font-size: 0.58rem;
   font-weight: 600;
   line-height: 1;
-  padding: 0.15rem 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border-radius: 3px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
