@@ -127,7 +127,7 @@ export async function testLiveArgs() {
 // links) doesn't hit the API again. Failures are dropped so they can be retried. `limit` evicts the oldest.
 function cache(limit = Infinity) {
   const entries = new Map()
-  return (key, load) => {
+  const lookup = (key, load) => {
     if (entries.has(key)) {
       const hit = entries.get(key)
       entries.delete(key)
@@ -142,6 +142,8 @@ function cache(limit = Infinity) {
     if (entries.size > limit) entries.delete(entries.keys().next().value)
     return promise
   }
+  lookup.forget = key => entries.delete(key)
+  return lookup
 }
 
 const matchCache = cache(20)
@@ -196,7 +198,8 @@ async function storedOrFetched(kind, matchId, load, isComplete) {
   return fresh
 }
 
-const parsedMatch = m => m?.didRadiantWin != null && !!m.players?.length && m.players.every(p => p.stats?.networthPerMinute?.length)
+const parsedMatch = m =>
+  m?.parsedDateTime != null && m.didRadiantWin != null && !!m.players?.length && m.players.every(p => p.stats?.networthPerMinute?.length)
 const parsedPlayback = players => players.some(p => p.playbackData?.playerUpdateGoldEvents?.length)
 
 // Event-level data for finer-than-a-minute charts; it covers the whole match (~2 MB), so it's loaded separately.
@@ -221,14 +224,36 @@ async function loadMatchPlayback(matchId) {
   return data.match?.players ?? []
 }
 
+// Unparsed matches aren't kept even for the session, so every load asks Stratz whether parsing has finished.
 export function fetchMatchPlayers(matchId) {
-  return matchCache(String(matchId), () => storedOrFetched('match', matchId, () => loadMatchPlayers(matchId), parsedMatch))
+  const key = String(matchId)
+  return matchCache(key, () =>
+    storedOrFetched('match', matchId, () => loadMatchPlayers(matchId), parsedMatch).then(data => {
+      if (!parsedMatch(data)) matchCache.forget(key)
+      return data
+    }),
+  )
+}
+
+// Drops this session's copy of an unparsed match so the next fetch asks Stratz again. Parsed matches
+// come from browser storage regardless, so this only ever matters before parsing finishes.
+export function forgetMatch(matchId) {
+  matchCache.forget(String(matchId))
+  playbackCache.forget(String(matchId))
+}
+
+// Asks Stratz to download and parse the replay, the same as the "parse" button on stratz.com.
+// Resolves to false when Stratz won't queue it (e.g. the replay has expired).
+export async function requestMatchParse(matchId) {
+  const data = await stratzQuery(`mutation { retryMatchDownload(matchId: ${matchId}) }`)
+  return data?.retryMatchDownload === true
 }
 
 async function loadMatchPlayers(matchId) {
   const data = await stratzQuery(`{
     match(id: ${matchId}) {
       id
+      parsedDateTime
       startDateTime
       durationSeconds
       didRadiantWin
@@ -244,6 +269,7 @@ async function loadMatchPlayers(matchId) {
       players {
         steamAccountId
         playerSlot
+        partyId
         isRadiant
         heroId
         item0Id
@@ -289,6 +315,9 @@ async function loadMatchPlayers(matchId) {
           id
           name
           avatar
+          isAnonymous
+          seasonRank
+          seasonLeaderboardRank
         }
       }
     }

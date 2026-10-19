@@ -8,6 +8,8 @@ import {
   fetchPlayerMatches,
   fetchRankedPeriodPage,
   fetchItems,
+  forgetMatch,
+  requestMatchParse,
   PERIOD_PAGE_SIZE,
 } from '@/services/stratzApi.js'
 import {
@@ -33,6 +35,7 @@ import HeroIcon from '@/components/scout/HeroIcon.vue'
 import RoleIcon from '@/components/scout/RoleIcon.vue'
 import LaneCard from '@/components/scout/LaneCard.vue'
 import LaneOutcome from '@/components/scout/LaneOutcome.vue'
+import MatchupCard from '@/components/scout/MatchupCard.vue'
 
 const OPENDOTA_ICON = 'https://www.opendota.com/assets/images/icons/icon-512x512.png'
 const DOTABUFF_ICON = 'https://www.dotabuff.com/assets/favicon-retina-377ae687bcef452311a9c4303e2efcb1a3e9dceeb924084856e960256862b843.png'
@@ -95,6 +98,41 @@ const laneGroups = computed(() => groupByLane(players.value).map(group => {
 }))
 
 const facts = computed(() => gameFacts(match.value, view.value))
+
+// Each party gets its own bracket colour so neighbouring parties stay distinct.
+const PARTY_COLORS = ['#34bfff', '#e8c547', '#d65db1', '#4bb45f']
+
+// Party members are moved next to each other (in order of their first player) so a bracket above the
+// cards can span them; players who queued solo keep their place and get no bracket.
+function rosterTeam(key, label, won, list) {
+  const sizes = new Map()
+  for (const p of list) {
+    const id = p.thisMatch?.partyId
+    if (id != null) sizes.set(id, (sizes.get(id) ?? 0) + 1)
+  }
+  const partyOf = p => (sizes.get(p.thisMatch?.partyId) > 1 ? p.thisMatch.partyId : null)
+  const ordered = []
+  for (const p of list) {
+    if (ordered.includes(p)) continue
+    const id = partyOf(p)
+    ordered.push(...(id == null ? [p] : list.filter(q => partyOf(q) === id)))
+  }
+  const parties = []
+  ordered.forEach((p, i) => {
+    const id = partyOf(p)
+    if (id == null || parties.some(pt => pt.key === id)) return
+    parties.push({ key: id, start: i + 1, size: sizes.get(id), color: PARTY_COLORS[parties.length % PARTY_COLORS.length] })
+  })
+  return { key, label, won, players: ordered, parties }
+}
+
+const rosterTeams = computed(() => {
+  const won = match.value?.didRadiantWin
+  return [
+    rosterTeam('radiant', 'Radiant', won === true, players.value.filter(p => p.isRadiant)),
+    rosterTeam('dire', 'Dire', won === false, players.value.filter(p => !p.isRadiant)),
+  ]
+})
 
 // The three real lanes get a summary card; roamers only appear in the panels below. Full game swaps
 // the 10:00 numbers for end-of-game totals.
@@ -377,7 +415,53 @@ async function showMoreMatches(accountId) {
   }
 }
 
+// Stratz fills in parsedDateTime once the replay is processed; matches saved before that field was
+// fetched only exist in storage if they were parsed, so their per-minute stats stand in for it.
+function isParsedMatch(data) {
+  return data?.parsedDateTime != null || (!!data?.players?.length && data.players.every(p => p.stats?.networthPerMinute?.length))
+}
+
+// 'idle' | 'sending' | 'sent' | 'refused' | 'error', for the not-parsed banner's request button.
+const parseState = ref('idle')
+const parseError = ref('')
+const parseChecking = ref(false)
+const stillUnparsed = ref(false)
+
+async function requestParse() {
+  const id = match.value?.matchId
+  if (!id || parseState.value === 'sending') return
+  parseState.value = 'sending'
+  try {
+    parseState.value = (await requestMatchParse(id)) ? 'sent' : 'refused'
+  } catch (err) {
+    parseError.value = err.message
+    parseState.value = 'error'
+  }
+}
+
+// One refetch per click; once parsed, the match reloads in full (and is saved for next time).
+async function checkParsed() {
+  const id = match.value?.matchId
+  if (!id || parseChecking.value) return
+  parseChecking.value = true
+  stillUnparsed.value = false
+  forgetMatch(id)
+  try {
+    const data = await fetchMatchPlayers(String(id))
+    if (isParsedMatch(data)) await loadByMatchId(String(id))
+    else stillUnparsed.value = true
+  } catch (err) {
+    parseError.value = err.message
+    parseState.value = 'error'
+  } finally {
+    parseChecking.value = false
+  }
+}
+
 function resetState() {
+  parseState.value = 'idle'
+  parseError.value = ''
+  stillUnparsed.value = false
   match.value = null
   playerData.value = {}
   dataLoading.value = {}
@@ -408,6 +492,8 @@ watch(
   { immediate: true },
 )
 
+const MIN_LOADING_MS = 450
+
 async function loadByMatchId(mid) {
   // The ID is interpolated into the GraphQL query, and shared links make it user-controlled.
   if (!/^\d+$/.test(mid)) {
@@ -417,8 +503,11 @@ async function loadByMatchId(mid) {
   }
   loading.value = true
   resetState()
+  const started = Date.now()
   try {
     const data = await fetchMatchPlayers(mid)
+    // Cached matches come back instantly; hold the loading state briefly so a reload visibly happens.
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, MIN_LOADING_MS - (Date.now() - started))))
     if (!data?.players?.length) {
       error.value = `Match ${mid} not found.`
       return
@@ -426,6 +515,7 @@ async function loadByMatchId(mid) {
     match.value = {
       ...data,
       matchId: data.id,
+      isParsed: isParsedMatch(data),
       laneOutcomes: {
         top: data.topLaneOutcome,
         mid: data.midLaneOutcome,
@@ -440,9 +530,12 @@ async function loadByMatchId(mid) {
         thisMatch: p,
       })),
     }
-    loadAllPlayerData()
-    loadPlayback(data.id)
-    loadItems()
+    // Unparsed matches only show the roster, whose names and avatars come with the match, so skip the rest.
+    if (match.value.isParsed) {
+      loadAllPlayerData()
+      loadPlayback(data.id)
+      loadItems()
+    }
   } catch (err) {
     error.value = err.message
   } finally {
@@ -462,7 +555,11 @@ async function loadByMatchId(mid) {
           placeholder="Match ID"
           @keydown.enter="searchMatch"
         />
-        <button class="load-btn" :disabled="loading" @click="searchMatch">
+        <button class="load-btn" :disabled="loading" :aria-busy="loading" @click="searchMatch">
+          <svg class="spin-icon" :class="{ spinning: loading }" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <path d="M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
           {{ loading ? 'Loading…' : 'Load Match' }}
         </button>
       </div>
@@ -498,6 +595,71 @@ async function loadByMatchId(mid) {
     </div>
 
     <template v-if="match">
+      <div v-if="!match.isParsed" class="parse-banner" role="status">
+        <svg class="parse-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="M12 7v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <circle cx="12" cy="16.5" r="1.2" fill="currentColor" />
+        </svg>
+        <div class="parse-text">
+          <strong>This match hasn't been parsed yet</strong>
+          <span>
+            Stratz hasn't processed the replay
+          </span>
+          <span v-if="parseState === 'sent'" class="parse-note parse-ok">Parse requested. It can take a few minutes, so check again shortly.</span>
+          <span v-else-if="parseState === 'refused'" class="parse-note parse-bad">Stratz couldn't queue this match. The replay may no longer be available.</span>
+          <span v-else-if="parseState === 'error'" class="parse-note parse-bad">Something went wrong: {{ parseError }}</span>
+          <span v-if="stillUnparsed && parseState !== 'error'" class="parse-note">Still not parsed.</span>
+        </div>
+        <div class="parse-actions">
+          <button
+            v-if="parseState !== 'sent'"
+            type="button"
+            class="parse-btn parse-primary"
+            :disabled="parseState === 'sending'"
+            @click="requestParse"
+          >{{ parseState === 'sending' ? 'Requesting…' : 'Request parse' }}</button>
+          <button type="button" class="parse-btn" :disabled="parseChecking" :aria-busy="parseChecking" @click="checkParsed">
+            <svg class="spin-icon" :class="{ spinning: parseChecking }" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+              <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+              <path d="M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            {{ parseChecking ? 'Checking…' : 'Check again' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Unparsed: just who played what, until Stratz has the replay. -->
+      <section v-if="!match.isParsed" class="panel roster">
+        <h2 class="lane-title roster-title">Matchup</h2>
+        <div class="roster-row">
+          <template v-for="(team, ti) in rosterTeams" :key="team.key">
+            <span v-if="ti" class="roster-vs" aria-hidden="true">vs</span>
+            <div class="roster-team" :aria-label="team.label">
+              <div class="roster-head">
+                <span class="team-label" :class="`${team.key}-label`">{{ team.label }}</span>
+                <span v-if="team.won" class="team-result">Victory</span>
+              </div>
+              <div class="roster-grid">
+                <span
+                  v-for="pt in team.parties"
+                  :key="pt.key"
+                  class="party-bracket"
+                  :style="{ gridColumn: `${pt.start} / span ${pt.size}`, '--party': pt.color }"
+                >Party of {{ pt.size }}</span>
+                <MatchupCard
+                  v-for="pl in team.players"
+                  :key="cardKey(pl)"
+                  :player="pl"
+                  :style="team.parties.length ? { gridRow: 2 } : null"
+                />
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <template v-else>
       <!-- Match summary -->
       <section class="panel summary">
         <div class="summary-top">
@@ -820,6 +982,7 @@ async function loadByMatchId(mid) {
         </div>
         </div>
       </section>
+      </template>
     </template>
   </div>
 </template>
@@ -870,7 +1033,15 @@ async function loadByMatchId(mid) {
   padding: 0.6rem 1.4rem;
   transition: opacity 0.15s;
 }
-.load-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.load-btn { display: inline-flex; align-items: center; gap: 0.45rem; }
+.load-btn:disabled { opacity: 0.7; cursor: progress; }
+.parse-btn { display: inline-flex; align-items: center; gap: 0.35rem; }
+.spin-icon { flex-shrink: 0; }
+.spin-icon.spinning { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spin-icon.spinning { animation: none; opacity: 0.6; }
+}
 .load-btn:hover:not(:disabled) { opacity: 0.85; }
 .error-msg {
   color: #ff6b6b;
@@ -887,6 +1058,98 @@ async function loadByMatchId(mid) {
   border-radius: 10px;
   padding: 1rem;
   margin-bottom: 1.25rem;
+}
+
+/* Not-parsed notice: amber, to read as "incomplete" rather than an error. */
+.parse-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(232,168,56,.35);
+  border-radius: 10px;
+  background: rgba(232,168,56,.08);
+}
+.parse-icon { flex-shrink: 0; margin-top: 0.1rem; color: #e8a838; }
+.parse-text {
+  flex: 1 1 18rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--color-muted, #7a8799);
+}
+.parse-text strong { font-size: 0.85rem; color: var(--color-text); }
+.parse-note { font-weight: 600; color: var(--color-text); }
+.parse-ok { color: #4bb45f; }
+.parse-bad { color: #e06666; }
+.parse-actions { display: flex; gap: 0.4rem; align-self: center; flex-wrap: wrap; }
+.parse-btn {
+  background: transparent;
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 999px;
+  color: var(--color-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.parse-btn:hover:not(:disabled) { border-color: var(--color-muted, #7a8799); }
+.parse-primary { background: rgba(232,168,56,.15); border-color: rgba(232,168,56,.45); color: #e8a838; }
+.parse-primary:hover:not(:disabled) { background: rgba(232,168,56,.22); border-color: #e8a838; }
+.parse-btn:disabled { cursor: progress; opacity: 0.7; }
+
+/* Unparsed matchup: both teams on one row of player cards, Stratz style. */
+.roster-title { margin-bottom: 0.85rem; }
+.roster-row { display: flex; align-items: center; gap: 0.9rem; }
+.roster-team { flex: 1; min-width: 0; }
+.roster-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.roster-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+/* A bracket over each party's cards: a line with downturned ends and a small label. */
+.party-bracket {
+  grid-row: 1;
+  position: relative;
+  margin: 0 0.25rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 2px solid var(--party);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: var(--party);
+}
+.party-bracket::before,
+.party-bracket::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  width: 2px;
+  height: 6px;
+  background: var(--party);
+}
+.party-bracket::before { left: 0; }
+.party-bracket::after { right: 0; }
+
+.roster-vs {
+  align-self: center;
+  margin-top: 1.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-muted, #7a8799);
+}
+/* Too narrow for ten cards: stack the teams. */
+@media (max-width: 1000px) {
+  .roster-row { flex-direction: column; align-items: stretch; }
+  .roster-vs { margin: 0; text-align: center; }
 }
 
 /* Summary */
