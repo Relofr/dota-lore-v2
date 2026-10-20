@@ -6,9 +6,12 @@ import RankMedal from '@/components/RankMedal.vue'
 const props = defineProps({
   // A ScoutView player: { accountId, name, thisMatch } where thisMatch is the raw Stratz match player.
   player: { type: Object, required: true },
+  // { kills, deaths, assists, networth } to show instead of the end-of-game totals, e.g. at the laning cutoff.
+  stats: { type: Object, default: null },
 })
 
 const m = computed(() => props.player.thisMatch ?? {})
+const s = computed(() => props.stats ?? m.value)
 const account = computed(() => m.value.steamAccount ?? {})
 const name = computed(() => (props.player.accountId ? account.value.name || props.player.name : 'Anonymous'))
 </script>
@@ -18,8 +21,8 @@ const name = computed(() => (props.player.accountId ? account.value.name || prop
     <HeroIcon :hero="m.hero" wide class="hero-img" />
 
     <div class="card-stats">
-      <div class="kda" :aria-label="`${m.kills} kills, ${m.deaths} deaths, ${m.assists} assists`">
-        <span>{{ m.kills ?? '—' }}</span><i>/</i><span>{{ m.deaths ?? '—' }}</span><i>/</i><span>{{ m.assists ?? '—' }}</span>
+      <div class="kda" :aria-label="`${s.kills} kills, ${s.deaths} deaths, ${s.assists} assists`">
+        <span>{{ s.kills ?? '—' }}</span><i>/</i><span>{{ s.deaths ?? '—' }}</span><i>/</i><span>{{ s.assists ?? '—' }}</span>
       </div>
       <div class="networth" title="Net worth">
         <svg viewBox="0 0 16 12" width="16" height="12" aria-hidden="true">
@@ -28,7 +31,7 @@ const name = computed(() => (props.player.accountId ? account.value.name || prop
           <ellipse cx="10.5" cy="5.2" rx="4.5" ry="2.9" fill="#b8860b" />
           <ellipse cx="10.5" cy="4.1" rx="4.5" ry="2.9" fill="#f5d36a" />
         </svg>
-        {{ m.networth != null ? m.networth.toLocaleString() : '—' }}
+        {{ s.networth != null ? s.networth.toLocaleString() : '—' }}
       </div>
     </div>
 

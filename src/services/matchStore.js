@@ -3,7 +3,9 @@
 // Records live in `data`; `meta` holds just { key, kind, at } so pruning never loads the big records.
 
 const DB_NAME = 'dota-lore'
-const DB_VERSION = 1
+// Bump whenever the match or playback queries gain fields: the upgrade clears records saved without them.
+// v2: party IDs and player ranks on the match query. v3: win probability (winRates).
+const DB_VERSION = 3
 // Most entries kept per kind; the least recently used go first.
 const LIMITS = { match: 100, playback: 25 }
 
@@ -15,6 +17,7 @@ function openDb() {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = () => {
       const db = req.result
+      for (const name of [...db.objectStoreNames]) db.deleteObjectStore(name)
       db.createObjectStore('data')
       db.createObjectStore('meta', { keyPath: 'key' }).createIndex('kind', 'kind')
     }

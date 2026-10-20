@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   fetchPlayersData,
@@ -29,6 +29,7 @@ import {
 import StratzIcon from '@/components/StratzIcon.vue'
 import RankMedal from '@/components/RankMedal.vue'
 import LeadChart from '@/components/scout/LeadChart.vue'
+import TeamChart from '@/components/scout/TeamChart.vue'
 import ItemRow from '@/components/scout/ItemRow.vue'
 import LaneBreakdown from '@/components/scout/LaneBreakdown.vue'
 import HeroIcon from '@/components/scout/HeroIcon.vue'
@@ -36,6 +37,7 @@ import RoleIcon from '@/components/scout/RoleIcon.vue'
 import LaneCard from '@/components/scout/LaneCard.vue'
 import LaneOutcome from '@/components/scout/LaneOutcome.vue'
 import MatchupCard from '@/components/scout/MatchupCard.vue'
+import TeamLineup from '@/components/scout/TeamLineup.vue'
 
 const OPENDOTA_ICON = 'https://www.opendota.com/assets/images/icons/icon-512x512.png'
 const DOTABUFF_ICON = 'https://www.dotabuff.com/assets/favicon-retina-377ae687bcef452311a9c4303e2efcb1a3e9dceeb924084856e960256862b843.png'
@@ -46,7 +48,10 @@ const loading = ref(false)
 const error = ref(null)
 const match = ref(null)
 const view = ref('laning')
-const teamMetric = ref('networth')
+// The stat row under the pointer, as `lane:pair:label`, so the facing hero's card lights the same row.
+const hoveredStat = ref(null)
+// The summary chart's measures, overlaid when more than one is picked.
+const teamMetrics = ref(['networth'])
 const laneMetric = ref({})
 const itemMap = ref(new Map())
 const historyOpen = ref({})
@@ -104,7 +109,7 @@ const PARTY_COLORS = ['#34bfff', '#e8c547', '#d65db1', '#4bb45f']
 
 // Party members are moved next to each other (in order of their first player) so a bracket above the
 // cards can span them; players who queued solo keep their place and get no bracket.
-function rosterTeam(key, label, won, list) {
+function rosterTeam(key, label, won, list, colorOffset = 0) {
   const sizes = new Map()
   for (const p of list) {
     const id = p.thisMatch?.partyId
@@ -121,56 +126,120 @@ function rosterTeam(key, label, won, list) {
   ordered.forEach((p, i) => {
     const id = partyOf(p)
     if (id == null || parties.some(pt => pt.key === id)) return
-    parties.push({ key: id, start: i + 1, size: sizes.get(id), color: PARTY_COLORS[parties.length % PARTY_COLORS.length] })
+    const color = PARTY_COLORS[(colorOffset + parties.length) % PARTY_COLORS.length]
+    parties.push({ key: id, start: i + 1, size: sizes.get(id), color })
   })
   return { key, label, won, players: ordered, parties }
 }
 
+// Dire's party colours continue on from Radiant's, so no two brackets in the match share a colour.
 const rosterTeams = computed(() => {
   const won = match.value?.didRadiantWin
-  return [
-    rosterTeam('radiant', 'Radiant', won === true, players.value.filter(p => p.isRadiant)),
-    rosterTeam('dire', 'Dire', won === false, players.value.filter(p => !p.isRadiant)),
-  ]
+  const radiant = rosterTeam('radiant', 'Radiant', won === true, players.value.filter(p => p.isRadiant))
+  const dire = rosterTeam('dire', 'Dire', won === false, players.value.filter(p => !p.isRadiant), radiant.parties.length)
+  return [radiant, dire]
 })
 
-// The three real lanes get a summary card; roamers only appear in the panels below. Full game swaps
-// the 10:00 numbers for end-of-game totals.
-const laneCards = computed(() => {
-  const endMinute = Math.ceil((match.value?.durationSeconds ?? 0) / 60)
-  const full = view.value === 'full' && endMinute > 0
-  return laneGroups.value.filter(g => g.key !== 'other').map(g => ({
-    ...g,
-    stats: full ? laneBreakdown(g, players.value, g.outcome, endMinute)?.rows : g.breakdown?.rows,
-    statsLabel: full ? 'End of game' : `At ${LANE_MINUTE}:00`,
-  }))
-})
+// The three real lanes get a matchup card in the sidebar; roamers only appear in the panels.
+const laneCards = computed(() => laneGroups.value.filter(g => g.key !== 'other'))
 
-function scrollToLane(key) {
+function scrollToSection(id) {
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  document.getElementById(`lane-${key}`)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+  document.getElementById(id)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 
+function scrollToLane(key) {
+  scrollToSection(`lane-${key}`)
+}
+
+function laneKeyOf(p) {
+  return laneGroups.value.find(g => g.radiant.includes(p) || g.dire.includes(p))?.key ?? null
+}
+
+// Which section is in view, so the sidebar can highlight it: the first one whose top part is on screen.
+const activeSection = ref('overview')
+let sectionObserver = null
+const visibleSections = new Set()
+
+function watchSections() {
+  sectionObserver?.disconnect()
+  visibleSections.clear()
+  const sections = [...document.querySelectorAll('[data-section]')]
+  if (!sections.length || typeof IntersectionObserver === 'undefined') return
+  // The band is just under the sticky app header, so a section counts once its top reaches there.
+  sectionObserver = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      if (e.isIntersecting) visibleSections.add(e.target.id)
+      else visibleSections.delete(e.target.id)
+    }
+    const first = sections.find(el => visibleSections.has(el.id))
+    if (first) activeSection.value = first.id
+  }, { rootMargin: '-80px 0px -55% 0px' })
+  for (const el of sections) sectionObserver.observe(el)
+}
+
+watch(
+  () => [match.value?.matchId, match.value?.isParsed, laneGroups.value.length],
+  async () => {
+    activeSection.value = 'overview'
+    await nextTick()
+    watchSections()
+  },
+)
+onBeforeUnmount(() => sectionObserver?.disconnect())
+
+
+
+// Line colours for when measures are overlaid: a validated set (all pairs, dark surface #1a1f2b) that
+// stays clear of the Radiant green and Dire red. Win probability is dashed in a neutral, as it isn't a lead.
 const TEAM_METRICS = [
-  { key: 'networth', tab: 'Net worth', label: 'Team net worth lead' },
-  { key: 'experience', tab: 'Experience', label: 'Team experience lead' },
-  { key: 'heroDamage', tab: 'Hero damage', label: 'Team hero damage lead' },
+  { key: 'heroDamage', tab: 'Hero Damage', label: 'Team Hero Damage Lead', color: '#d55181' },
+  { key: 'winProbability', tab: 'Win Probability', label: 'Win Probability', color: '#c3c8d2', kind: 'probability' },
+  { key: 'networth', tab: 'Net Worth', label: 'Team Net Worth Lead', color: '#c98500' },
+  { key: 'experience', tab: 'Experience', label: 'Team Experience Lead', color: '#3987e5' },
 ]
 
-const teamSeries = computed(() => {
+const teamLeads = computed(() =>
+  leadSeries(players.value.filter(p => p.isRadiant), players.value.filter(p => !p.isRadiant), fine.value))
+
+// Stratz has team-level leads for net worth and XP only; damage is summed from the players.
+function teamMetricSeries(metric) {
   const m = match.value
-  if (!m) return null
-  const metric = teamMetric.value
-  // Stratz has team-level leads for net worth and XP only; damage is summed from the players.
+  if (metric === 'winProbability') {
+    return m.winRates?.length ? { values: windowed(m.winRates), step: 60 } : null
+  }
   if (fine.value || metric === 'heroDamage') {
-    const leads = leadSeries(players.value.filter(p => p.isRadiant), players.value.filter(p => !p.isRadiant), fine.value)
+    const leads = teamLeads.value
     if (leads) return { values: windowed(leads[metric], leads.step), step: leads.step }
     if (metric === 'heroDamage') return null
   }
   const source = metric === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
-  if (!source?.length) return null
-  return { values: windowed(source), step: 60 }
+  return source?.length ? { values: windowed(source), step: 60 } : null
+}
+
+// Every measure this match has data for, so a chip only shows when it can draw something.
+const teamAvailable = computed(() => {
+  if (!match.value) return []
+  return TEAM_METRICS
+    .map(tm => ({ ...tm, kind: tm.kind ?? 'lead', ...teamMetricSeries(tm.key) }))
+    .filter(tm => tm.values?.length)
 })
+
+const teamSeries = computed(() => {
+  const picked = teamAvailable.value.filter(tm => teamMetrics.value.includes(tm.key))
+  // Falls back to the first measure if nothing picked has data (e.g. no win probability for this match).
+  return picked.length ? picked : teamAvailable.value.slice(0, 1)
+})
+
+// Toggles a measure on or off, but never the last one: the chart always shows something.
+function toggleTeamMetric(key) {
+  const shown = teamSeries.value.map(s => s.key)
+  if (shown.includes(key)) {
+    if (shown.length > 1) teamMetrics.value = shown.filter(k => k !== key)
+  } else {
+    teamMetrics.value = [...shown, key]
+  }
+}
 
 const teamKills = computed(() => {
   const sum = arr => (arr ?? []).reduce((a, b) => a + b, 0)
@@ -190,9 +259,9 @@ function windowed(values, step = 60) {
 }
 
 const LANE_METRICS = [
-  { key: 'networth', tab: 'Net worth' },
+  { key: 'networth', tab: 'Net Worth' },
   { key: 'experience', tab: 'Experience' },
-  { key: 'heroDamage', tab: 'Hero damage' },
+  { key: 'heroDamage', tab: 'Hero Damage' },
 ]
 
 function laneChart(group) {
@@ -206,7 +275,7 @@ function laneChart(group) {
   }))
   if (metric === 'experience') {
     return {
-      label: 'Lane experience lead',
+      label: 'Lane Experience Lead',
       values: windowed(leads.experience, leads.step),
       extras: [
         { label: 'Net worth lead', values: windowed(leads.networth, leads.step) },
@@ -217,14 +286,14 @@ function laneChart(group) {
   }
   if (metric === 'heroDamage') {
     return {
-      label: 'Lane hero damage lead',
+      label: 'Lane Hero Damage Lead',
       values: windowed(leads.heroDamage, leads.step),
       extras: [],
       heroes,
     }
   }
   return {
-    label: 'Lane net worth lead',
+    label: 'Lane Net Worth Lead',
     values: windowed(leads.networth, leads.step),
     extras: [
       { label: 'XP lead', values: windowed(leads.experience, leads.step) },
@@ -232,6 +301,21 @@ function laneChart(group) {
     ],
     heroes,
   }
+}
+
+// This player's stats as rows, @10 and end of game side by side, for the vertical table on each card.
+function matchStatRows(p) {
+  const m = p.thisMatch
+  const at = statsAt(m)
+  const pair = (a, b) => (a == null || b == null ? '—' : `${a} / ${b}`)
+  return [
+    { label: 'Level', at: at?.level, total: m.level },
+    { label: 'K / D / A', at: at && `${at.kills} / ${at.deaths} / ${at.assists}`, total: `${m.kills} / ${m.deaths} / ${m.assists}` },
+    { label: 'LH / DN', at: at && pair(at.lastHits, at.denies), total: pair(m.numLastHits, m.numDenies) },
+    { label: 'GPM / XPM', at: at && pair(at.gpm, at.xpm), total: pair(m.goldPerMinute, m.experiencePerMinute) },
+    { label: 'Net worth', at: at && compact(at.networth), total: m.networth != null ? compact(m.networth) : null },
+    { label: 'Hero damage', at: at && compact(at.heroDamage), total: m.heroDamage != null ? compact(m.heroDamage) : null },
+  ]
 }
 
 function positionText(p) {
@@ -567,31 +651,35 @@ async function loadByMatchId(mid) {
     </header>
 
     <!-- Placeholder shaped like the summary and a lane while the match loads. -->
-    <div v-if="loading && !match" class="scout-skeleton" aria-busy="true" aria-label="Loading match">
-      <section class="panel summary">
-        <div class="skel-summary-top">
-          <span class="skel" style="width: 5rem; height: 1rem" />
-          <span class="skel" style="width: 6rem; height: 1.8rem" />
-          <span class="skel" style="width: 5rem; height: 1rem" />
-        </div>
-        <div class="skel-chips">
-          <span class="skel skel-chip" /><span class="skel skel-chip" />
-        </div>
-        <div class="summary-body">
-          <span class="skel" style="height: 220px" />
-          <span class="skel" style="height: 220px" />
-        </div>
-        <div class="lane-cards">
-          <span v-for="i in 3" :key="i" class="skel" style="height: 190px" />
-        </div>
-      </section>
-      <section v-for="i in 2" :key="i" class="panel lane-panel">
-        <span class="skel" style="width: 8rem; height: 1.1rem; margin-bottom: 0.9rem" />
-        <span class="skel" style="height: 170px; margin-bottom: 1rem" />
-        <div class="skel-cards">
-          <span v-for="j in 2" :key="j" class="skel" style="height: 150px" />
-        </div>
-      </section>
+    <div v-if="loading && !match" class="match-layout scout-skeleton" aria-busy="true" aria-label="Loading match">
+      <aside class="match-nav">
+        <span class="skel skel-chip" style="width: 100%" />
+        <span v-for="i in 3" :key="i" class="skel" style="height: 88px" />
+      </aside>
+      <div class="match-content">
+        <section class="panel summary">
+          <div class="summary-top">
+            <span class="skel" style="width: 5rem; height: 1.6rem" />
+            <span class="skel" style="width: 6rem; height: 2.4rem" />
+            <span class="skel" style="width: 5rem; height: 1.6rem; justify-self: end" />
+          </div>
+          <div class="lineups">
+            <span class="skel" style="height: 90px" />
+            <span class="skel" style="height: 90px" />
+          </div>
+          <div class="summary-body">
+            <span class="skel" style="height: 220px" />
+            <span class="skel" style="height: 220px" />
+          </div>
+        </section>
+        <section class="panel lane-panel">
+          <span class="skel" style="width: 8rem; height: 1.1rem; margin-bottom: 0.9rem" />
+          <span class="skel" style="height: 170px; margin-bottom: 1rem" />
+          <div class="skel-cards">
+            <span v-for="j in 2" :key="j" class="skel" style="height: 150px" />
+          </div>
+        </section>
+      </div>
     </div>
 
     <template v-if="match">
@@ -618,13 +706,13 @@ async function loadByMatchId(mid) {
             class="parse-btn parse-primary"
             :disabled="parseState === 'sending'"
             @click="requestParse"
-          >{{ parseState === 'sending' ? 'Requesting…' : 'Request parse' }}</button>
+          >{{ parseState === 'sending' ? 'Requesting…' : 'Request Parse' }}</button>
           <button type="button" class="parse-btn" :disabled="parseChecking" :aria-busy="parseChecking" @click="checkParsed">
             <svg class="spin-icon" :class="{ spinning: parseChecking }" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
               <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
               <path d="M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
-            {{ parseChecking ? 'Checking…' : 'Check again' }}
+            {{ parseChecking ? 'Checking…' : 'Check Again' }}
           </button>
         </div>
       </div>
@@ -635,47 +723,80 @@ async function loadByMatchId(mid) {
         <div class="roster-row">
           <template v-for="(team, ti) in rosterTeams" :key="team.key">
             <span v-if="ti" class="roster-vs" aria-hidden="true">vs</span>
-            <div class="roster-team" :aria-label="team.label">
-              <div class="roster-head">
-                <span class="team-label" :class="`${team.key}-label`">{{ team.label }}</span>
-                <span v-if="team.won" class="team-result">Victory</span>
-              </div>
-              <div class="roster-grid">
-                <span
-                  v-for="pt in team.parties"
-                  :key="pt.key"
-                  class="party-bracket"
-                  :style="{ gridColumn: `${pt.start} / span ${pt.size}`, '--party': pt.color }"
-                >Party of {{ pt.size }}</span>
-                <MatchupCard
-                  v-for="pl in team.players"
-                  :key="cardKey(pl)"
-                  :player="pl"
-                  :style="team.parties.length ? { gridRow: 2 } : null"
-                />
-              </div>
-            </div>
+            <TeamLineup :team="team" class="roster-team">
+              <template #default="{ player }">
+                <MatchupCard :player="player" />
+              </template>
+            </TeamLineup>
           </template>
         </div>
       </section>
 
-      <template v-else>
-      <!-- Match summary -->
-      <section class="panel summary">
+      <div v-else class="match-layout">
+        <!-- Sticky sidebar: the time range and each lane's hero matchup, which jumps to that lane. -->
+        <aside class="match-nav" aria-label="Lanes">
+          <div class="nav-toggle">
+          <div class="chips view-toggle" role="tablist" aria-label="Time range">
+            <button
+              role="tab"
+              :aria-selected="view === 'laning'"
+              :class="{ active: view === 'laning' }"
+              @click="view = 'laning'"
+            >Laning · 0–{{ LANE_MINUTE }}</button>
+            <button
+              role="tab"
+              :aria-selected="view === 'full'"
+              :class="{ active: view === 'full' }"
+              @click="view = 'full'"
+            >Full Game</button>
+          </div>
+          </div>
+
+          <div class="nav-lanes">
+            <button
+              type="button"
+              class="nav-summary"
+              :class="{ active: activeSection === 'overview' }"
+              :aria-current="activeSection === 'overview' ? 'location' : null"
+              title="Jump to the summary"
+              @click="scrollToSection('overview')"
+            >
+              <span class="nav-summary-head">
+                <span class="nav-summary-title">Summary</span>
+                <span class="nav-summary-time">{{ formatTime(match.durationSeconds) }}</span>
+              </span>
+              <!-- The winning side's kills are gold, matching the Victory badges in the overview. -->
+              <span class="nav-summary-score">
+                <span class="side-radiant" :class="{ 'nav-winner': match.didRadiantWin === true }">{{ teamKills.radiant }}</span>
+                <span class="score-sep">–</span>
+                <span class="side-dire" :class="{ 'nav-winner': match.didRadiantWin === false }">{{ teamKills.dire }}</span>
+              </span>
+            </button>
+            <LaneCard
+              v-for="group in laneCards"
+              :key="group.key"
+              :group="group"
+              :active="activeSection === `lane-${group.key}`"
+              @select="scrollToLane"
+            />
+          </div>
+        </aside>
+
+        <div class="match-content">
+      <!-- Overview -->
+      <section id="overview" data-section class="panel summary">
         <div class="summary-top">
           <div class="team-side">
             <span class="team-label radiant-label">Radiant</span>
             <span v-if="match.didRadiantWin === true" class="team-result">Victory</span>
           </div>
           <div class="summary-center">
-            <div class="score">
-              <span>{{ teamKills.radiant }}</span>
+            <div class="score" :aria-label="`Kills: Radiant ${teamKills.radiant}, Dire ${teamKills.dire}`">
+              <span class="side-radiant">{{ teamKills.radiant }}</span>
               <span class="score-sep">–</span>
-              <span>{{ teamKills.dire }}</span>
+              <span class="side-dire">{{ teamKills.dire }}</span>
             </div>
-            <div class="summary-meta">
-              {{ formatTime(match.durationSeconds) }}
-            </div>
+            <div class="summary-meta">{{ formatTime(match.durationSeconds) }}</div>
           </div>
           <div class="team-side team-side-right">
             <span v-if="match.didRadiantWin === false" class="team-result">Victory</span>
@@ -683,40 +804,37 @@ async function loadByMatchId(mid) {
           </div>
         </div>
 
-        <div class="chips view-toggle" role="tablist" aria-label="Time range">
-          <button
-            role="tab"
-            :aria-selected="view === 'laning'"
-            :class="{ active: view === 'laning' }"
-            @click="view = 'laning'"
-          >Laning · 0–{{ LANE_MINUTE }} min</button>
-          <button
-            role="tab"
-            :aria-selected="view === 'full'"
-            :class="{ active: view === 'full' }"
-            @click="view = 'full'"
-          >Full game</button>
+        <!-- Radiant on the left and Dire on the right, under the matching badges above. -->
+        <div class="lineups">
+          <TeamLineup v-for="team in rosterTeams" :key="team.key" :team="team" hide-head>
+            <template #default="{ player }">
+              <button
+                type="button"
+                class="lineup-tile"
+                :disabled="!laneKeyOf(player)"
+                :title="`${player.thisMatch?.hero?.displayName ?? 'Hero'} · ${playerName(player)}: jump to their lane`"
+                @click="scrollToLane(laneKeyOf(player))"
+              >
+                <MatchupCard :player="player" :stats="view === 'laning' ? statsAt(player.thisMatch) : null" />
+              </button>
+            </template>
+          </TeamLineup>
         </div>
 
         <div class="summary-body">
-          <div v-if="teamSeries" class="summary-chart">
-            <div class="chips" role="radiogroup" aria-label="Team lead metric">
+          <div v-if="teamSeries.length" class="summary-chart">
+            <!-- Toggles rather than tabs: pick several to overlay them. -->
+            <div class="chips" role="group" aria-label="Team chart measures">
               <button
-                v-for="tm in TEAM_METRICS"
+                v-for="tm in teamAvailable"
                 :key="tm.key"
-                role="radio"
-                :aria-checked="teamMetric === tm.key"
-                :class="{ active: teamMetric === tm.key }"
-                @click="teamMetric = tm.key"
+                type="button"
+                :aria-pressed="teamSeries.some(s => s.key === tm.key)"
+                :class="{ active: teamSeries.some(s => s.key === tm.key) }"
+                @click="toggleTeamMetric(tm.key)"
               >{{ tm.tab }}</button>
             </div>
-            <LeadChart
-              :values="teamSeries.values"
-              :step="teamSeries.step"
-              :label="TEAM_METRICS.find(tm => tm.key === teamMetric).label"
-              :height="170"
-              fill
-            />
+            <TeamChart :series="teamSeries" :height="170" fill />
           </div>
           <div v-if="facts.length" class="facts-card">
             <div class="section-label">{{ view === 'laning' ? `Laning · 0–${LANE_MINUTE} min` : 'Match' }}</div>
@@ -741,20 +859,10 @@ async function loadByMatchId(mid) {
             </dl>
           </div>
         </div>
-        <div v-if="laneCards.length" class="lane-cards">
-          <LaneCard
-            v-for="group in laneCards"
-            :key="group.key"
-            :group="group"
-            :stats="group.stats ?? []"
-            :stats-label="group.statsLabel"
-            @select="scrollToLane"
-          />
-        </div>
       </section>
 
       <!-- Lanes -->
-      <section v-for="group in laneGroups" :id="`lane-${group.key}`" :key="group.key" class="panel lane-panel">
+      <section v-for="group in laneGroups" :id="`lane-${group.key}`" :key="group.key" data-section class="panel lane-panel">
         <header class="lane-head">
           <h2 class="lane-title">{{ group.label }}</h2>
           <!-- Shown beside the breakdown when there is one. -->
@@ -791,6 +899,8 @@ async function loadByMatchId(mid) {
         </aside>
 
         <div class="lane-players">
+          <div class="side-head side-head-r"><i class="side-key key-radiant" />Radiant</div>
+          <div class="side-head side-head-d"><i class="side-key key-dire" />Dire</div>
           <template v-for="(row, ri) in group.rows" :key="`row-${ri}`">
             <template v-for="(p, side) in [row.radiant, row.dire]" :key="`cell-${ri}-${side}`">
               <div v-if="!p" class="player-card-spacer" />
@@ -853,35 +963,34 @@ async function loadByMatchId(mid) {
                     <span v-if="positionText(p)" class="hero-line-pos">{{ positionText(p) }}</span>
                   </div>
 
-                  <div class="this-match-table">
-                    <div class="tm-row tm-head">
-                      <span>Stat</span>
-                      <span>Lvl</span>
-                      <span>KDA</span>
-                      <span>LH/DN</span>
-                      <span>GPM/XPM</span>
-                      <span>NW</span>
-                      <span>Dmg</span>
-                    </div>
-                    <div v-if="statsAt(p.thisMatch)" class="tm-row" :class="{ 'tm-focus': view === 'laning' }">
-                      <span class="tm-key">@{{ LANE_MINUTE }}</span>
-                      <span>{{ statsAt(p.thisMatch).level }}</span>
-                      <span>{{ statsAt(p.thisMatch).kills }}/{{ statsAt(p.thisMatch).deaths }}/{{ statsAt(p.thisMatch).assists }}</span>
-                      <span>{{ statsAt(p.thisMatch).lastHits }}/{{ statsAt(p.thisMatch).denies }}</span>
-                      <span>{{ statsAt(p.thisMatch).gpm }}/{{ statsAt(p.thisMatch).xpm }}</span>
-                      <span>{{ compact(statsAt(p.thisMatch).networth) }}</span>
-                      <span>{{ compact(statsAt(p.thisMatch).heroDamage) }}</span>
-                    </div>
-                    <div class="tm-row" :class="{ 'tm-focus': view === 'full' }">
-                      <span class="tm-key">Total</span>
-                      <span>{{ p.thisMatch.level ?? '—' }}</span>
-                      <span>{{ p.thisMatch.kills }}/{{ p.thisMatch.deaths }}/{{ p.thisMatch.assists }}</span>
-                      <span>{{ p.thisMatch.numLastHits }}/{{ p.thisMatch.numDenies }}</span>
-                      <span>{{ p.thisMatch.goldPerMinute }}/{{ p.thisMatch.experiencePerMinute }}</span>
-                      <span>{{ compact(p.thisMatch.networth) }}</span>
-                      <span>{{ compact(p.thisMatch.heroDamage) }}</span>
-                    </div>
-                  </div>
+                  <table class="tm-table">
+                    <thead>
+                      <tr>
+                        <th scope="col"><span class="visually-hidden">Stat</span></th>
+                        <!-- Each column doubles as the time range toggle, same as the sidebar's. The header buttons
+                             give keyboard access; their clicks bubble up to the cell handlers. -->
+                        <th v-if="statsAt(p.thisMatch)" scope="col" class="col-laning" :class="{ focus: view === 'laning' }" @click="view = 'laning'">
+                          <button type="button" class="tm-col" :aria-pressed="view === 'laning'">@ {{ LANE_MINUTE }}:00</button>
+                        </th>
+                        <th scope="col" class="col-full" :class="{ focus: view === 'full' }" @click="view = 'full'">
+                          <button type="button" class="tm-col" :aria-pressed="view === 'full'">End of Game</button>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="row in matchStatRows(p)"
+                        :key="row.label"
+                        :class="{ 'stat-hover': hoveredStat === `${group.key}:${ri}:${row.label}` }"
+                        @mouseenter="hoveredStat = `${group.key}:${ri}:${row.label}`"
+                        @mouseleave="hoveredStat = null"
+                      >
+                        <th scope="row">{{ row.label }}</th>
+                        <td v-if="statsAt(p.thisMatch)" class="col-laning" :class="{ focus: view === 'laning' }" @click="view = 'laning'">{{ row.at ?? '—' }}</td>
+                        <td class="col-full" :class="{ focus: view === 'full' }" @click="view = 'full'">{{ row.total ?? '—' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
 
                   <div v-if="!itemMap.size && itemsLoading" class="section items-section">
                     <span class="skel skel-line" style="width: 6rem; margin-bottom: 0.5rem" />
@@ -898,7 +1007,7 @@ async function loadByMatchId(mid) {
                   :aria-expanded="!!historyOpen[cardKey(p)]"
                   @click="toggleHistory(p)"
                 >
-                  <span>Player history</span>
+                  <span>Player History</span>
                   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" :class="{ open: historyOpen[cardKey(p)] }">
                     <path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
                   </svg>
@@ -971,7 +1080,7 @@ async function loadByMatchId(mid) {
                         :disabled="moreLoading[p.accountId]"
                         @click="showMoreMatches(p.accountId)"
                       >
-                        {{ moreLoading[p.accountId] ? 'Loading…' : 'Show more' }}
+                        {{ moreLoading[p.accountId] ? 'Loading…' : 'Show More' }}
                       </button>
                     </div>
                   </template>
@@ -982,7 +1091,8 @@ async function loadByMatchId(mid) {
         </div>
         </div>
       </section>
-      </template>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -1107,37 +1217,6 @@ async function loadByMatchId(mid) {
 .roster-title { margin-bottom: 0.85rem; }
 .roster-row { display: flex; align-items: center; gap: 0.9rem; }
 .roster-team { flex: 1; min-width: 0; }
-.roster-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
-.roster-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.55rem;
-}
-/* A bracket over each party's cards: a line with downturned ends and a small label. */
-.party-bracket {
-  grid-row: 1;
-  position: relative;
-  margin: 0 0.25rem;
-  padding-bottom: 0.3rem;
-  border-bottom: 2px solid var(--party);
-  font-size: 0.62rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  text-align: center;
-  color: var(--party);
-}
-.party-bracket::before,
-.party-bracket::after {
-  content: '';
-  position: absolute;
-  bottom: -6px;
-  width: 2px;
-  height: 6px;
-  background: var(--party);
-}
-.party-bracket::before { left: 0; }
-.party-bracket::after { right: 0; }
 
 .roster-vs {
   align-self: center;
@@ -1152,15 +1231,111 @@ async function loadByMatchId(mid) {
   .roster-vs { margin: 0; text-align: center; }
 }
 
-/* Summary */
+/* Match layout: a sticky sidebar of navigation beside the scrolling sections. */
+.match-layout {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.match-content { min-width: 0; }
+.match-nav {
+  position: sticky;
+  top: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  background: var(--color-surface, #1a1f2b);
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 10px;
+}
+.nav-toggle {
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border, #2e3542);
+}
+.nav-lanes { display: flex; flex-direction: column; gap: 0.6rem; }
+/* Same frame as the lane cards, for jumping back up to the summary. */
+.nav-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  color: var(--color-text);
+  background: rgba(255,255,255,.02);
+  border: 1px solid var(--color-border, #2e3542);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.nav-summary:hover { border-color: rgba(52,191,255,.4); background: rgba(52,191,255,.05); }
+.nav-summary:focus-visible { outline: 2px solid #34bfff; outline-offset: 2px; }
+.nav-summary.active { border-color: rgba(52,191,255,.55); background: rgba(52,191,255,.07); box-shadow: inset 3px 0 0 #34bfff; }
+.nav-summary-title { font-size: 0.85rem; font-weight: 700; }
+.nav-summary-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.nav-summary-time { font-size: 0.75rem; color: var(--color-muted, #7a8799); font-variant-numeric: tabular-nums; }
+.nav-summary-score { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.nav-summary-score .nav-winner {
+  color: #e8c547;
+  padding: 0.05rem 0.35rem;
+  background: rgba(232,197,71,.12);
+  border: 1px solid rgba(232,197,71,.35);
+  border-radius: 4px;
+}
+
+/* Narrower screens: the sidebar sits above the sections and the lanes go across. */
+@media (max-width: 1100px) {
+  .match-layout { grid-template-columns: minmax(0, 1fr); }
+  .match-nav { position: static; }
+  .nav-lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .nav-lanes { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Score header: Radiant badge, kills and duration, Dire badge. */
 .summary-top {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 1rem;
+  margin-bottom: 1rem;
 }
 .team-side { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .team-side-right { justify-content: flex-end; }
+.summary-center { text-align: center; }
+.summary-meta { font-size: 0.75rem; color: var(--color-muted, #7a8799); font-variant-numeric: tabular-nums; }
+
+/* Overview: both lineups side by side above the chart and facts. */
+.lineups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid var(--color-border, #2e3542);
+}
+/* Each player's card in the lineup jumps to the lane they were in. */
+.lineup-tile {
+  display: flex;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.lineup-tile .matchup-card { flex: 1; transition: border-color 0.15s, background 0.15s; }
+.lineup-tile:hover:not(:disabled) .matchup-card { border-color: rgba(52,191,255,.55); background: rgba(52,191,255,.06); }
+.lineup-tile:focus-visible { outline: 2px solid #34bfff; outline-offset: 2px; }
+.lineup-tile:disabled { cursor: default; }
+@media (max-width: 900px) {
+  .lineups { grid-template-columns: minmax(0, 1fr); }
+}
+
 .team-label {
   font-size: 0.72rem;
   font-weight: 700;
@@ -1171,14 +1346,18 @@ async function loadByMatchId(mid) {
 }
 .radiant-label { background: rgba(75,180,95,.15); color: #4bb45f; border: 1px solid rgba(75,180,95,.3); }
 .dire-label    { background: rgba(200,60,60,.15);  color: #c83c3c; border: 1px solid rgba(200,60,60,.3); }
+/* Same gold box as the winning kill count in the sidebar. */
 .team-result {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--color-text);
+  color: #e8c547;
+  padding: 0.15rem 0.5rem;
+  background: rgba(232,197,71,.12);
+  border: 1px solid rgba(232,197,71,.35);
+  border-radius: 4px;
 }
-.summary-center { text-align: center; }
 .score {
   font-size: 1.6rem;
   font-weight: 700;
@@ -1188,8 +1367,6 @@ async function loadByMatchId(mid) {
   justify-content: center;
 }
 .score-sep { color: var(--color-muted, #7a8799); }
-.summary-meta { font-size: 0.75rem; color: var(--color-muted, #7a8799); }
-.summary-meta strong { color: var(--color-text); font-variant-numeric: tabular-nums; }
 
 /* Pill chips for the view and graph metric pickers. */
 .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
@@ -1208,8 +1385,9 @@ async function loadByMatchId(mid) {
 .chips button.active { background: rgba(52,191,255,.15); border-color: rgba(52,191,255,.3); color: #34bfff; }
 .chips button:hover:not(.active) { color: var(--color-text); border-color: var(--color-muted, #7a8799); }
 /* The page-level time range picker: centred and a touch larger than the graph chips. */
-.view-toggle { justify-content: center; margin: 1rem 0 0.75rem; }
-.view-toggle button { font-size: 0.75rem; padding: 0.35rem 0.9rem; }
+/* The time range picker: full-width in the sidebar, a touch larger than the graph chips. */
+.view-toggle { margin: 0; flex-wrap: nowrap; }
+.view-toggle button { flex: 1; font-size: 0.74rem; padding: 0.4rem 0.6rem; white-space: nowrap; }
 
 .summary-body {
   display: grid;
@@ -1219,7 +1397,7 @@ async function loadByMatchId(mid) {
 }
 /* The chart grows to the facts card's height. */
 .summary-chart { display: flex; flex-direction: column; min-width: 0; }
-.summary-chart .lead-chart { flex: 1; }
+.summary-chart .team-chart { flex: 1; }
 /* Framed like the lane cards, with rows styled after the lane breakdown table. */
 .facts-card {
   padding: 0.75rem 0.85rem;
@@ -1255,13 +1433,8 @@ async function loadByMatchId(mid) {
 .fact-hero { width: 20px; height: 20px; border-radius: 3px; }
 .fb-verb { font-size: 0.7rem; font-weight: 500; color: var(--color-muted, #7a8799); }
 .fb-time { margin-left: 0.2rem; }
-.lane-cards {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin-top: 1.1rem;
-}
-/* Clear the sticky app header when a lane card scrolls here. */
+/* Clear the sticky app header when the sidebar jumps here. */
+.summary,
 .lane-panel { scroll-margin-top: 80px; }
 
 .match-note {
@@ -1297,14 +1470,9 @@ async function loadByMatchId(mid) {
   gap: var(--card-gap);
   align-items: start;
 }
-.lane-body.has-side {
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
-  grid-template-areas: "players side";
-}
+.lane-body.has-side { grid-template-areas: "side" "players"; }
 .lane-side {
   grid-area: side;
-  position: sticky;
-  top: calc(64px + 1rem);
   background: #161a24;
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 8px;
@@ -1319,21 +1487,31 @@ async function loadByMatchId(mid) {
   align-items: start;
 }
 
-/* Two player-card columns need ~1150px; below that the breakdown moves above them. */
-@media (max-width: 1600px) {
-  .lane-body.has-side {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "side" "players";
-  }
-  .lane-side { position: static; }
+/* Column headers over each side's player cards. */
+.side-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-bottom: 0.1rem;
 }
+.side-head-r { color: #4bb45f; }
+.side-head-d { color: #c83c3c; }
+.side-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.key-radiant { background: #45a957; }
+.key-dire { background: #c83c3c; }
+
 @media (max-width: 900px) {
   .summary-body { grid-template-columns: minmax(0, 1fr); }
-  .lane-cards { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 800px) {
   .lane-players { grid-template-columns: minmax(0, 1fr); }
   .player-card-spacer { display: none; }
+  /* One column: the two headers would sit together above mixed cards; the coloured card edges mark sides instead. */
+  .side-head { display: none; }
   .summary-top { grid-template-columns: 1fr; text-align: center; }
   .team-side, .team-side-right { justify-content: center; }
 }
@@ -1346,8 +1524,8 @@ async function loadByMatchId(mid) {
   padding: 0.75rem;
   min-width: 0;
 }
-.card-radiant { border-left: 3px solid rgba(75,180,95,.6); }
-.card-dire    { border-left: 3px solid rgba(200,60,60,.6); }
+.card-radiant { border-left: 3px solid rgba(75,180,95,.7); background: linear-gradient(90deg, rgba(75,180,95,.05), transparent 40%), #161a24; }
+.card-dire    { border-left: 3px solid rgba(200,60,60,.7); background: linear-gradient(90deg, rgba(200,60,60,.05), transparent 40%), #161a24; }
 
 .player-header {
   display: flex;
@@ -1464,28 +1642,70 @@ async function loadByMatchId(mid) {
   white-space: nowrap;
 }
 
-.this-match-table {
-  margin-top: 0.5rem;
-  overflow-x: auto;
-}
-.tm-row {
-  display: grid;
-  grid-template-columns: 2.4rem 1.8rem minmax(3.6rem, 1fr) minmax(3rem, 1fr) minmax(4.4rem, 1fr) minmax(2.8rem, 1fr) minmax(2.8rem, 1fr);
-  column-gap: 0.5rem;
-  align-items: center;
-  padding: 0.18rem 0;
+/* Stats as rows, @10 and end of game as columns; the column for the current view is lit. */
+.tm-table {
+  width: 100%;
+  margin-top: 0.6rem;
+  /* Separate, not collapsed: cells only take a border radius in this mode. */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.78rem;
-  color: var(--color-muted, #7a8799);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
-.tm-row.tm-focus { color: var(--color-text); }
-.tm-key {
-  font-size: 0.66rem;
+.tm-table th,
+.tm-table td { padding: 0.3rem 0.5rem; text-align: right; white-space: nowrap; }
+.tm-table thead th {
+  font-size: 0.6rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-muted, #7a8799);
+  border-bottom: 1px solid var(--color-border, #2e3542);
+}
+.tm-table tbody th {
+  text-align: left;
+  padding-left: 0;
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--color-muted, #7a8799);
+}
+.tm-table tbody tr + tr > * { border-top: 1px solid rgba(255,255,255,.04); }
+.tm-table td { color: var(--color-muted, #7a8799); }
+.tm-table .focus { color: var(--color-text); font-weight: 600; background-color: rgba(52,191,255,.06); }
+.tm-table thead .focus { color: #34bfff; }
+.tm-col {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.col-laning,
+.col-full { cursor: pointer; background: rgba(255,255,255,.02); background-clip: padding-box; }
+/* Each column reads as its own rounded block, with a 5px gap between the two (a transparent border). */
+.tm-table .col-laning { border-right: 5px solid transparent; }
+.tm-table thead :is(.col-laning, .col-full) { border-radius: 6px 6px 0 0; }
+.tm-table tbody tr:last-child :is(.col-laning, .col-full) { border-radius: 0 0 6px 6px; }
+/* Hovering anywhere in the other column lights up that whole column. */
+.tm-table:has(.col-laning:hover) .col-laning:not(.focus),
+.tm-table:has(.col-full:hover) .col-full:not(.focus) { color: var(--color-text); background-color: rgba(255,255,255,.05); }
+/* The hovered stat row, on both heroes facing each other. An overlay image so it sits on top of the
+   column tints without replacing them. */
+.tm-table tbody tr.stat-hover > * {
+  color: var(--color-text);
+  background-image: linear-gradient(rgba(255,255,255,.07), rgba(255,255,255,.07));
+}
+.tm-col:focus-visible { outline: 2px solid #34bfff; outline-offset: 2px; border-radius: 2px; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .history-toggle {
@@ -1531,8 +1751,6 @@ async function loadByMatchId(mid) {
 .skel-row { height: 22px; margin: 0.35rem 0; border-radius: 4px; }
 .skel-items { display: flex; gap: 0.3rem; }
 .skel-item { width: 32px; height: 24px; border-radius: 3px; }
-.skel-summary-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.skel-chips { display: flex; justify-content: center; gap: 0.35rem; margin: 1rem 0 0.75rem; }
 .skel-chip { width: 7rem; height: 1.7rem; border-radius: 999px; }
 .skel-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
 @media (max-width: 800px) {
@@ -1630,8 +1848,7 @@ async function loadByMatchId(mid) {
   font-size: 0.72rem;
   color: var(--color-muted, #7a8799);
 }
-.list-head,
-.tm-head {
+.list-head {
   font-size: 0.6rem;
   font-weight: 700;
   text-transform: uppercase;

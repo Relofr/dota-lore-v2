@@ -263,6 +263,7 @@ async function loadMatchPlayers(matchId) {
       firstBloodTime
       radiantNetworthLeads
       radiantExperienceLeads
+      winRates
       radiantKills
       direKills
       towerDeaths { time isRadiant }

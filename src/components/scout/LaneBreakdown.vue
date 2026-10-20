@@ -76,12 +76,13 @@ function share(row) {
 
     <div v-if="breakdown.matchups.length" class="matchups">
     <div v-for="mu in breakdown.matchups" :key="mu.title" class="core">
-      <div class="core-title">{{ mu.title }}</div>
       <div class="compare" role="table" :aria-label="mu.title">
+        <!-- The title sits in the metric column, level with the hero icons. -->
         <div class="compare-row compare-head" role="row">
-          <span role="columnheader" class="side side-r"><HeroIcon :hero="mu.radiant" class="hero-key" /></span>
+          <span role="columnheader" class="core-title">{{ mu.title }}</span>
+          <span role="columnheader" class="side side-r side-hero"><span class="hero-badge badge-r"><HeroIcon :hero="mu.radiant" class="hero-key" /></span></span>
           <span role="columnheader" aria-hidden="true" />
-          <span role="columnheader" class="side side-d"><HeroIcon :hero="mu.dire" class="hero-key" /></span>
+          <span role="columnheader" class="side side-d"><span class="hero-badge badge-d"><HeroIcon :hero="mu.dire" class="hero-key" /></span></span>
         </div>
         <div v-for="row in mu.rows" :key="row.key" class="compare-row" role="row">
           <span role="rowheader" class="metric">{{ row.label }}</span>
@@ -182,6 +183,8 @@ function share(row) {
   color: var(--color-muted, #7a8799);
 }
 .side-r { grid-column: 1 / 3; justify-content: flex-end; }
+/* In a matchup the title takes the first column, so the Radiant hero keeps to its own. */
+.side-r.side-hero { grid-column: auto; }
 .side { white-space: nowrap; }
 .key {
   display: inline-block;
@@ -255,16 +258,19 @@ function share(row) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  white-space: nowrap;
   font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-muted, #7a8799);
-  margin-bottom: 0.2rem;
 }
 /* Hero icons stand in for the Radiant/Dire key. */
-.hero-key { width: 22px; height: 22px; border-radius: 3px; }
+.hero-key { display: block; width: 22px; height: 22px; border-radius: 3px; }
+/* Each hero on its team colour, the same as the sidebar's lane cards. */
+.hero-badge { display: inline-flex; padding: 0.2rem; border-radius: 5px; }
+.badge-r { background: rgba(75,180,95,.16); box-shadow: inset 0 0 0 1px rgba(75,180,95,.3); }
+.badge-d { background: rgba(200,60,60,.16); box-shadow: inset 0 0 0 1px rgba(200,60,60,.3); }
 .notes li { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; }
 .note-label { margin-right: 0; }
 .ganker { display: inline-flex; align-items: center; gap: 0.2rem; }

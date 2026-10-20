@@ -19,6 +19,7 @@ defineProps({
   line-height: 1.1;
   padding: 0.15rem 0.45rem;
   border-radius: 3px;
+  white-space: nowrap;
 }
 .lane-radiant { color: #4bb45f; background: rgba(75,180,95,.12); border: 1px solid rgba(75,180,95,.3); }
 .lane-dire    { color: #c83c3c; background: rgba(200,60,60,.12); border: 1px solid rgba(200,60,60,.3); }

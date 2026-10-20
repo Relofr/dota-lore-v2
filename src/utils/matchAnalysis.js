@@ -18,18 +18,18 @@ export function heroImage(hero, wide = false) {
 }
 
 const MAP_LANES = [
-  { key: 'bottom', label: 'Bottom Lane', radiantRole: 'Safe lane', direRole: 'Off lane' },
-  { key: 'mid', label: 'Mid Lane', radiantRole: 'Mid', direRole: 'Mid' },
-  { key: 'top', label: 'Top Lane', radiantRole: 'Off lane', direRole: 'Safe lane' },
+  { key: 'bottom', label: 'Bottom Lane', short: 'Bottom', radiantRole: 'Safe lane', direRole: 'Off lane' },
+  { key: 'mid', label: 'Mid Lane', short: 'Mid', radiantRole: 'Mid', direRole: 'Mid' },
+  { key: 'top', label: 'Top Lane', short: 'Top', radiantRole: 'Off lane', direRole: 'Safe lane' },
   { key: 'other', label: 'Jungle / Roaming' },
 ]
 
 const OUTCOME_TEXT = {
-  RADIANT_STOMP: { text: 'Radiant stomped the lane', side: 'radiant' },
-  RADIANT_VICTORY: { text: 'Radiant won the lane', side: 'radiant' },
-  DIRE_STOMP: { text: 'Dire stomped the lane', side: 'dire' },
-  DIRE_VICTORY: { text: 'Dire won the lane', side: 'dire' },
-  TIE: { text: 'Even lane', side: 'neutral' },
+  RADIANT_STOMP: { text: 'Radiant stomp', side: 'radiant' },
+  RADIANT_VICTORY: { text: 'Radiant won', side: 'radiant' },
+  DIRE_STOMP: { text: 'Dire stomp', side: 'dire' },
+  DIRE_VICTORY: { text: 'Dire won', side: 'dire' },
+  TIE: { text: 'Even', side: 'neutral' },
 }
 
 // Radiant's safe lane is bottom and Dire's is top; the off lanes are the reverse.
