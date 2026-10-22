@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, useId } from 'vue'
 import { compact, formatTime } from '@/utils/matchAnalysis.js'
+import HeroIcon from './HeroIcon.vue'
 
 const props = defineProps({
   // [{ key, label, kind: 'lead' | 'probability', values, step, color }]. Leads are Radiant minus Dire;
@@ -9,9 +10,16 @@ const props = defineProps({
   height: { type: Number, default: 150 },
   // Grow to fill the parent's height (never below `height`), e.g. to match a neighbouring panel.
   fill: { type: Boolean, default: false },
+  // Heading when several series are overlaid; a lone series is titled by its own label.
+  title: { type: String, default: 'Advantage' },
+  // [{ label, values, step }]: leads listed in the tooltip without a line of their own.
+  extras: { type: Array, default: () => [] },
+  // [{ key, hero, isRadiant, values: { [seriesKey]: number[] } }]: each hero's own totals, listed in
+  // the tooltip under the leads, one column per shown series. Indexed like the series of that key.
+  heroes: { type: Array, default: () => [] },
 })
 
-// Same validated pair as LeadChart: one series alone keeps the Radiant-above / Dire-below colouring.
+// Validated pair (dark surface #1a1f2b): one series alone is coloured Radiant above the line, Dire below.
 const RADIANT = '#45a957'
 const DIRE = '#c83c3c'
 const PAD = { l: 44, r: 12, t: 10, b: 22 }
@@ -146,13 +154,33 @@ const hoverRows = computed(() => {
     .filter(r => r.v != null)
 })
 
+const extraRows = computed(() => {
+  if (hover.value == null) return []
+  return props.extras
+    .map(ex => ({ ex, v: valueAt(ex, hover.value) }))
+    .filter(r => r.v != null)
+})
+
+// The series that have per-hero values, in legend order: the tooltip's hero columns.
+const heroColumns = computed(() => scaled.value.filter(s => props.heroes.some(hr => hr.values[s.key])))
+
+const heroSides = computed(() => [
+  { key: 'radiant', label: 'Radiant', list: props.heroes.filter(hr => hr.isRadiant) },
+  { key: 'dire', label: 'Dire', list: props.heroes.filter(hr => !hr.isRadiant) },
+].filter(side => side.list.length && heroColumns.value.length))
+
+function heroValue(hr, s) {
+  const v = hr.values[s.key] ? valueAt({ values: hr.values[s.key], step: s.step }, hover.value) : null
+  return v == null ? '—' : compact(v)
+}
+
 const tooltipStyle = computed(() => {
   if (hover.value == null) return {}
   const px = x(hover.value)
-  return px > width.value - 210 ? { right: `${width.value - px + 10}px` } : { left: `${px + 10}px` }
+  return px > width.value - (props.heroes.length ? 280 : 210) ? { right: `${width.value - px + 10}px` } : { left: `${px + 10}px` }
 })
 
-const title = computed(() => (single.value ? props.series[0].label : 'Team Advantage'))
+const heading = computed(() => (single.value ? props.series[0].label : props.title))
 
 const summary = computed(() => props.series
   .map(s => {
@@ -163,11 +191,10 @@ const summary = computed(() => props.series
 </script>
 
 <template>
-  <div ref="root" class="team-chart" :class="{ fill }">
+  <div ref="root" class="advantage-chart" :class="{ fill }">
     <div class="chart-head">
       <span class="chart-title">
-        {{ title }}
-        <span v-if="!single" class="chart-note">· each line scaled to its own peak</span>
+        {{ heading }}
       </span>
       <span class="legend">
         <template v-if="single">
@@ -199,6 +226,10 @@ const summary = computed(() => props.series
           <clipPath :id="`${uid}-below`"><rect :x="0" :y="zeroY" :width="width" :height="h" /></clipPath>
         </defs>
 
+        <!-- Radiant's half tinted green and Dire's red, so which side a line favours reads at a glance. -->
+        <rect class="zone" :x="PAD.l" :y="PAD.t" :width="plotW" :height="zeroY - PAD.t" :fill="RADIANT" />
+        <rect class="zone" :x="PAD.l" :y="zeroY" :width="plotW" :height="h - PAD.b - zeroY" :fill="DIRE" />
+
         <g class="grid">
           <line v-for="t in yTicks" :key="t.n" :x1="PAD.l" :x2="width - PAD.r" :y1="y(t.n)" :y2="y(t.n)" :class="{ zero: t.n === 0 }" />
         </g>
@@ -209,7 +240,7 @@ const summary = computed(() => props.series
           <text v-for="t in xTicks" :key="t.t" :x="x(t.t)" :y="h - 6" text-anchor="middle">{{ t.label }}</text>
         </g>
 
-        <!-- One series: green above the line and red below, as in the lane charts. -->
+        <!-- One series: green above the line and red below. -->
         <template v-if="single">
           <path
             :d="`${lines[0].d}L${x((lines[0].values.length - 1) * lines[0].step).toFixed(1)},${zeroY.toFixed(1)}L${x(0).toFixed(1)},${zeroY.toFixed(1)}Z`"
@@ -255,6 +286,23 @@ const summary = computed(() => props.series
           <strong>{{ display(r.s, r.v) }}</strong>
           <span>{{ r.s.label }} · {{ sideShort(r.s, r.v) }}</span>
         </div>
+        <div v-for="r in extraRows" :key="r.ex.label" class="tt-row">
+          <i :style="{ color: r.v < 0 ? DIRE : RADIANT }" />
+          <strong>{{ compact(Math.abs(r.v)) }}</strong>
+          <span>{{ r.ex.label }} · {{ r.v > 0 ? 'Radiant' : r.v < 0 ? 'Dire' : 'even' }}</span>
+        </div>
+        <div v-for="side in heroSides" :key="side.key" class="tt-heroes" :style="{ '--cols': heroColumns.length }">
+          <div class="tt-side">{{ side.label }}</div>
+          <!-- With several series, a key above the columns says which value is which. -->
+          <div v-if="!single" class="tt-hero tt-hero-key">
+            <span />
+            <i v-for="s in heroColumns" :key="s.key" :class="{ dashed: s.kind === 'probability' }" :style="{ color: s.color }" />
+          </div>
+          <div v-for="hr in side.list" :key="hr.key" class="tt-hero">
+            <HeroIcon :hero="hr.hero" class="tt-hero-icon" />
+            <strong v-for="s in heroColumns" :key="s.key">{{ heroValue(hr, s) }}</strong>
+          </div>
+        </div>
       </div>
     </div>
     <div class="x-label">Minute</div>
@@ -262,7 +310,7 @@ const summary = computed(() => props.series
 </template>
 
 <style scoped>
-.team-chart { position: relative; min-width: 0; }
+.advantage-chart { position: relative; min-width: 0; }
 
 .chart-head {
   display: flex;
@@ -277,7 +325,6 @@ const summary = computed(() => props.series
   font-weight: 600;
   color: var(--color-text);
 }
-.chart-note { font-weight: 400; color: var(--color-muted, #7a8799); }
 .legend { display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; }
 .key {
   display: inline-flex;
@@ -307,12 +354,13 @@ const summary = computed(() => props.series
 
 .chart-body { position: relative; }
 /* In fill mode the body takes the spare height and the SVG is sized from it, so it can't push back. */
-.team-chart.fill { display: flex; flex-direction: column; height: 100%; }
-.team-chart.fill .chart-body { flex: 1; }
-.team-chart.fill .chart-svg { position: absolute; top: 0; left: 0; }
+.advantage-chart.fill { display: flex; flex-direction: column; height: 100%; }
+.advantage-chart.fill .chart-body { flex: 1; }
+.advantage-chart.fill .chart-svg { position: absolute; top: 0; left: 0; }
 .chart-svg { display: block; max-width: 100%; outline: none; touch-action: pan-y; }
 .chart-svg:focus-visible { outline: 1px solid var(--color-accent, #34bfff); outline-offset: 2px; border-radius: 4px; }
 
+.zone { fill-opacity: 0.07; }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .grid line { stroke: #2a3140; stroke-width: 1; shape-rendering: crispEdges; }
 .grid line.zero { stroke: #4a5366; }
@@ -357,5 +405,35 @@ const summary = computed(() => props.series
   white-space: nowrap;
 }
 .tt-row strong { color: var(--color-text); font-weight: 700; min-width: 3.2rem; }
+.tt-heroes {
+  margin-top: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid #2e3542;
+}
+.tt-side {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted, #7a8799);
+  margin-bottom: 0.15rem;
+}
+.tt-hero {
+  display: grid;
+  grid-template-columns: 20px repeat(var(--cols), minmax(2.6rem, auto));
+  align-items: center;
+  column-gap: 0.5rem;
+  font-size: 0.72rem;
+  padding: 0.08rem 0;
+  white-space: nowrap;
+}
+.tt-hero-key i {
+  justify-self: end;
+  width: 12px;
+  border-top: 2px solid currentColor;
+}
+.tt-hero-key i.dashed { border-top-style: dashed; }
+.tt-hero :deep(img) { width: 20px; height: 20px; border-radius: 3px; object-fit: cover; }
+.tt-hero strong { color: var(--color-text); font-weight: 700; text-align: right; }
 .tt-row span { color: var(--color-muted, #7a8799); }
 </style>

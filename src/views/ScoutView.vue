@@ -28,8 +28,7 @@ import {
 } from '@/utils/matchAnalysis.js'
 import StratzIcon from '@/components/StratzIcon.vue'
 import RankMedal from '@/components/RankMedal.vue'
-import LeadChart from '@/components/scout/LeadChart.vue'
-import TeamChart from '@/components/scout/TeamChart.vue'
+import AdvantageChart from '@/components/scout/AdvantageChart.vue'
 import ItemRow from '@/components/scout/ItemRow.vue'
 import LaneBreakdown from '@/components/scout/LaneBreakdown.vue'
 import HeroIcon from '@/components/scout/HeroIcon.vue'
@@ -38,9 +37,9 @@ import LaneCard from '@/components/scout/LaneCard.vue'
 import LaneOutcome from '@/components/scout/LaneOutcome.vue'
 import MatchupCard from '@/components/scout/MatchupCard.vue'
 import TeamLineup from '@/components/scout/TeamLineup.vue'
+import MatchLinks from '@/components/scout/MatchLinks.vue'
+import { OPENDOTA_ICON, DOTABUFF_ICON } from '@/utils/siteIcons.js'
 
-const OPENDOTA_ICON = 'https://www.opendota.com/assets/images/icons/icon-512x512.png'
-const DOTABUFF_ICON = 'https://www.dotabuff.com/assets/favicon-retina-377ae687bcef452311a9c4303e2efcb1a3e9dceeb924084856e960256862b843.png'
 const route = useRoute()
 const router = useRouter()
 const matchIdInput = ref('')
@@ -50,9 +49,10 @@ const match = ref(null)
 const view = ref('laning')
 // The stat row under the pointer, as `lane:pair:label`, so the facing hero's card lights the same row.
 const hoveredStat = ref(null)
-// The summary chart's measures, overlaid when more than one is picked.
-const teamMetrics = ref(['networth'])
-const laneMetric = ref({})
+// The summary chart's measures, overlaid when more than one is picked; all of them to start.
+const teamMetrics = ref(['heroDamage', 'winProbability', 'networth', 'experience'])
+// Each lane chart's picked measures by lane key; a lane not in here shows hero damage only.
+const laneMetrics = ref({})
 const itemMap = ref(new Map())
 const historyOpen = ref({})
 const playerData = ref({})
@@ -140,6 +140,9 @@ const rosterTeams = computed(() => {
   return [radiant, dire]
 })
 
+// When either team queued in a party, both lineups keep a bracket row so their cards line up.
+const anyParty = computed(() => rosterTeams.value.some(t => t.parties.length))
+
 // The three real lanes get a matchup card in the sidebar; roamers only appear in the panels.
 const laneCards = computed(() => laneGroups.value.filter(g => g.key !== 'other'))
 
@@ -193,10 +196,10 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
 // Line colours for when measures are overlaid: a validated set (all pairs, dark surface #1a1f2b) that
 // stays clear of the Radiant green and Dire red. Win probability is dashed in a neutral, as it isn't a lead.
 const TEAM_METRICS = [
-  { key: 'heroDamage', tab: 'Hero Damage', label: 'Team Hero Damage Lead', color: '#d55181' },
+  { key: 'heroDamage', tab: 'Hero Damage', label: 'Team Damage', color: '#d55181' },
   { key: 'winProbability', tab: 'Win Probability', label: 'Win Probability', color: '#c3c8d2', kind: 'probability' },
-  { key: 'networth', tab: 'Net Worth', label: 'Team Net Worth Lead', color: '#c98500' },
-  { key: 'experience', tab: 'Experience', label: 'Team Experience Lead', color: '#3987e5' },
+  { key: 'networth', tab: 'Net Worth', label: 'Team Net Worth', color: '#c98500' },
+  { key: 'experience', tab: 'Experience', label: 'Team Experience', color: '#3987e5' },
 ]
 
 const teamLeads = computed(() =>
@@ -231,14 +234,14 @@ const teamSeries = computed(() => {
   return picked.length ? picked : teamAvailable.value.slice(0, 1)
 })
 
-// Toggles a measure on or off, but never the last one: the chart always shows something.
+// The measures shown after toggling `key`, never dropping the last one: a chart always shows something.
+function toggled(shown, key) {
+  if (!shown.includes(key)) return [...shown, key]
+  return shown.length > 1 ? shown.filter(k => k !== key) : shown
+}
+
 function toggleTeamMetric(key) {
-  const shown = teamSeries.value.map(s => s.key)
-  if (shown.includes(key)) {
-    if (shown.length > 1) teamMetrics.value = shown.filter(k => k !== key)
-  } else {
-    teamMetrics.value = [...shown, key]
-  }
+  teamMetrics.value = toggled(teamSeries.value.map(s => s.key), key)
 }
 
 const teamKills = computed(() => {
@@ -258,49 +261,35 @@ function windowed(values, step = 60) {
   return view.value === 'laning' ? values.slice(0, (LANE_MINUTE * 60) / step + 1) : values
 }
 
-const LANE_METRICS = [
-  { key: 'networth', tab: 'Net Worth' },
-  { key: 'experience', tab: 'Experience' },
-  { key: 'heroDamage', tab: 'Hero Damage' },
-]
+// Same order and colours as the summary chart's leads.
+const LANE_METRICS = TEAM_METRICS
+  .filter(tm => tm.kind !== 'probability')
+  .map(tm => ({ ...tm, label: tm.label.replace('Team', 'Lane'), kind: 'lead' }))
 
-function laneChart(group) {
+function laneSeries(group) {
+  const picked = laneMetrics.value[group.key] ?? ['heroDamage']
+  return LANE_METRICS
+    .filter(m => picked.includes(m.key))
+    .map(m => ({ ...m, values: windowed(group.leads[m.key], group.leads.step), step: group.leads.step }))
+}
+
+function toggleLaneMetric(group, key) {
+  laneMetrics.value[group.key] = toggled(laneSeries(group).map(s => s.key), key)
+}
+
+// Last hits have no line of their own but are listed under the leads in the tooltip.
+function laneExtras(group) {
+  return [{ label: 'Last hits', values: windowed(group.leads.lastHits, group.leads.step), step: group.leads.step }]
+}
+
+function laneHeroes(group) {
   const leads = group.leads
-  const metric = laneMetric.value[group.key] ?? 'networth'
-  const heroes = leads.heroes.map(h => ({
+  return leads.heroes.map(h => ({
     key: h.player.thisMatch.playerSlot ?? h.player.heroId,
     hero: h.player.thisMatch.hero,
     isRadiant: h.player.isRadiant,
-    values: windowed(h[metric], leads.step),
+    values: Object.fromEntries(LANE_METRICS.map(m => [m.key, windowed(h[m.key], leads.step)])),
   }))
-  if (metric === 'experience') {
-    return {
-      label: 'Lane Experience Lead',
-      values: windowed(leads.experience, leads.step),
-      extras: [
-        { label: 'Net worth lead', values: windowed(leads.networth, leads.step) },
-        { label: 'Last hit lead', values: windowed(leads.lastHits, leads.step) },
-      ],
-      heroes,
-    }
-  }
-  if (metric === 'heroDamage') {
-    return {
-      label: 'Lane Hero Damage Lead',
-      values: windowed(leads.heroDamage, leads.step),
-      extras: [],
-      heroes,
-    }
-  }
-  return {
-    label: 'Lane Net Worth Lead',
-    values: windowed(leads.networth, leads.step),
-    extras: [
-      { label: 'XP lead', values: windowed(leads.experience, leads.step) },
-      { label: 'Last hit lead', values: windowed(leads.lastHits, leads.step) },
-    ],
-    heroes,
-  }
 }
 
 // This player's stats as rows, @10 and end of game side by side, for the vertical table on each card.
@@ -719,16 +708,31 @@ async function loadByMatchId(mid) {
 
       <!-- Unparsed: just who played what, until Stratz has the replay. -->
       <section v-if="!match.isParsed" class="panel roster">
-        <h2 class="lane-title roster-title">Matchup</h2>
-        <div class="roster-row">
-          <template v-for="(team, ti) in rosterTeams" :key="team.key">
-            <span v-if="ti" class="roster-vs" aria-hidden="true">vs</span>
-            <TeamLineup :team="team" class="roster-team">
-              <template #default="{ player }">
-                <MatchupCard :player="player" />
-              </template>
-            </TeamLineup>
-          </template>
+        <div class="panel-head">
+          <h2 class="lane-title">Matchup</h2>
+          <MatchLinks :match-id="match.matchId" />
+        </div>
+        <!-- Same header as a parsed match's summary, with "vs" where the score would be. -->
+        <div class="summary-top">
+          <div class="team-side">
+            <span class="team-label radiant-label">Radiant</span>
+            <span v-if="match.didRadiantWin === true" class="team-result">Victory</span>
+          </div>
+          <div class="summary-center">
+            <div class="score score-vs" aria-hidden="true">vs</div>
+            <div v-if="match.durationSeconds" class="summary-meta">{{ formatTime(match.durationSeconds) }}</div>
+          </div>
+          <div class="team-side team-side-right">
+            <span v-if="match.didRadiantWin === false" class="team-result">Victory</span>
+            <span class="team-label dire-label">Dire</span>
+          </div>
+        </div>
+        <div class="lineups roster-lineups">
+          <TeamLineup v-for="team in rosterTeams" :key="team.key" :team="team" :reserve-party="anyParty" hide-head>
+            <template #default="{ player }">
+              <MatchupCard :player="player" />
+            </template>
+          </TeamLineup>
         </div>
       </section>
 
@@ -785,6 +789,10 @@ async function loadByMatchId(mid) {
         <div class="match-content">
       <!-- Overview -->
       <section id="overview" data-section class="panel summary">
+        <div class="panel-head">
+          <h2 class="lane-title">Summary</h2>
+          <MatchLinks :match-id="match.matchId" />
+        </div>
         <div class="summary-top">
           <div class="team-side">
             <span class="team-label radiant-label">Radiant</span>
@@ -806,7 +814,7 @@ async function loadByMatchId(mid) {
 
         <!-- Radiant on the left and Dire on the right, under the matching badges above. -->
         <div class="lineups">
-          <TeamLineup v-for="team in rosterTeams" :key="team.key" :team="team" hide-head>
+          <TeamLineup v-for="team in rosterTeams" :key="team.key" :team="team" :reserve-party="anyParty" hide-head>
             <template #default="{ player }">
               <button
                 type="button"
@@ -834,7 +842,7 @@ async function loadByMatchId(mid) {
                 @click="toggleTeamMetric(tm.key)"
               >{{ tm.tab }}</button>
             </div>
-            <TeamChart :series="teamSeries" :height="170" fill />
+            <AdvantageChart :series="teamSeries" title="Team Advantage" :height="170" fill />
           </div>
           <div v-if="facts.length" class="facts-card">
             <div class="section-label">{{ view === 'laning' ? `Laning · 0–${LANE_MINUTE} min` : 'Match' }}</div>
@@ -873,22 +881,21 @@ async function loadByMatchId(mid) {
         </header>
 
         <div v-if="group.leads" class="lane-chart">
-          <div class="chips" role="radiogroup" :aria-label="`${group.label} chart metric`">
+          <div class="chips" role="group" :aria-label="`${group.label} chart measures`">
             <button
               v-for="m in LANE_METRICS"
               :key="m.key"
-              role="radio"
-              :aria-checked="(laneMetric[group.key] ?? 'networth') === m.key"
-              :class="{ active: (laneMetric[group.key] ?? 'networth') === m.key }"
-              @click="laneMetric[group.key] = m.key"
+              type="button"
+              :aria-pressed="laneSeries(group).some(s => s.key === m.key)"
+              :class="{ active: laneSeries(group).some(s => s.key === m.key) }"
+              @click="toggleLaneMetric(group, m.key)"
             >{{ m.tab }}</button>
           </div>
-          <LeadChart
-            :values="laneChart(group).values"
-            :extras="laneChart(group).extras"
-            :label="laneChart(group).label"
-            :heroes="laneChart(group).heroes"
-            :step="group.leads.step"
+          <AdvantageChart
+            :series="laneSeries(group)"
+            :extras="laneExtras(group)"
+            :heroes="laneHeroes(group)"
+            title="Lane Advantage"
             :height="170"
           />
         </div>
@@ -1213,23 +1220,10 @@ async function loadByMatchId(mid) {
 .parse-primary:hover:not(:disabled) { background: rgba(232,168,56,.22); border-color: #e8a838; }
 .parse-btn:disabled { cursor: progress; opacity: 0.7; }
 
-/* Unparsed matchup: both teams on one row of player cards, Stratz style. */
-.roster-title { margin-bottom: 0.85rem; }
-.roster-row { display: flex; align-items: center; gap: 0.9rem; }
-.roster-team { flex: 1; min-width: 0; }
-
-.roster-vs {
-  align-self: center;
-  margin-top: 1.6rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--color-muted, #7a8799);
-}
-/* Too narrow for ten cards: stack the teams. */
-@media (max-width: 1000px) {
-  .roster-row { flex-direction: column; align-items: stretch; }
-  .roster-vs { margin: 0; text-align: center; }
-}
+/* Unparsed matchup: the parsed summary header and lineups, without the chart below. */
+/* Title on the left, the match links level with it on the right (Matchup and Summary panels). */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.85rem; }
+.roster-lineups { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
 
 /* Match layout: a sticky sidebar of navigation beside the scrolling sections. */
 .match-layout {
@@ -1367,6 +1361,8 @@ async function loadByMatchId(mid) {
   justify-content: center;
 }
 .score-sep { color: var(--color-muted, #7a8799); }
+/* Stands in for the score before a match is parsed. */
+.score-vs { font-size: 1rem; font-weight: 600; color: var(--color-muted, #7a8799); }
 
 /* Pill chips for the view and graph metric pickers. */
 .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
@@ -1397,7 +1393,7 @@ async function loadByMatchId(mid) {
 }
 /* The chart grows to the facts card's height. */
 .summary-chart { display: flex; flex-direction: column; min-width: 0; }
-.summary-chart .team-chart { flex: 1; }
+.summary-chart .advantage-chart { flex: 1; }
 /* Framed like the lane cards, with rows styled after the lane breakdown table. */
 .facts-card {
   padding: 0.75rem 0.85rem;

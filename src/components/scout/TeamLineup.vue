@@ -4,6 +4,8 @@ defineProps({
   team: { type: Object, required: true },
   // Hide the team badge row when something above already labels the sides.
   hideHead: { type: Boolean, default: false },
+  // Keep the bracket row even with no party here, so this lineup lines up with one that has brackets.
+  reserveParty: { type: Boolean, default: false },
 })
 </script>
 
@@ -20,12 +22,14 @@ defineProps({
         class="party-bracket"
         :style="{ gridColumn: `${pt.start} / span ${pt.size}`, '--party': pt.color }"
       >Party of {{ pt.size }}</span>
+      <!-- An invisible bracket, the same height as a real one. -->
+      <span v-if="reserveParty && !team.parties.length" class="party-bracket party-space" aria-hidden="true">&nbsp;</span>
       <!-- Each player goes in row 2 when there are brackets above, so the brackets can span their columns. -->
       <div
         v-for="player in team.players"
         :key="player.thisMatch?.playerSlot ?? player.heroId"
         class="lineup-cell"
-        :style="team.parties.length ? { gridRow: 2 } : null"
+        :style="team.parties.length || reserveParty ? { gridRow: 2 } : null"
       >
         <slot :player="player" />
       </div>
@@ -90,6 +94,7 @@ defineProps({
   height: 6px;
   background: var(--party);
 }
+.party-space { grid-column: 1 / -1; visibility: hidden; }
 .party-bracket::before { left: 0; }
 .party-bracket::after { right: 0; }
 </style>
