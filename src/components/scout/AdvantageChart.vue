@@ -17,7 +17,17 @@ const props = defineProps({
   // [{ key, hero, isRadiant, values: { [seriesKey]: number[] } }]: each hero's own totals, listed in
   // the tooltip under the leads, one column per shown series. Indexed like the series of that key.
   heroes: { type: Array, default: () => [] },
+  // [{ key, time, type: 'roshan' | 'wisdom', side: 'radiant' | 'dire', hero }]: marked along the edge
+  // of the side that took them (Radiant top, Dire bottom) and listed in the tooltip near their time.
+  events: { type: Array, default: () => [] },
 })
+
+// Sizes keep each image's own aspect ratio. The Roshan minimap icon is served from public/ because the
+// wiki it comes from refuses hotlinked requests.
+const EVENT_TYPES = {
+  roshan: { icon: `${import.meta.env.BASE_URL}images/roshan.webp`, w: 19, h: 16, label: 'Roshan', verb: 'took the Aegis' },
+  wisdom: { icon: 'https://cdn.stratz.com/images/dota2/runes/wisdom.png', w: 16, h: 16, label: 'Wisdom rune', verb: 'took it' },
+}
 
 // Validated pair (dark surface #1a1f2b): one series alone is coloured Radiant above the line, Dire below.
 const RADIANT = '#45a957'
@@ -147,6 +157,28 @@ function onKey(e) {
   hover.value = snap(start + (e.key === 'ArrowRight' ? by : -by))
 }
 
+// Markers in the visible time range. One that would overlap the previous marker on its edge is nudged
+// right so both stay readable.
+const markers = computed(() => {
+  // Right edge of the last marker placed on each side.
+  const lastRight = { radiant: -Infinity, dire: -Infinity }
+  return props.events
+    .filter(e => e.time >= 0 && e.time <= duration.value)
+    .map(e => {
+      const t = EVENT_TYPES[e.type]
+      const cx = Math.max(x(e.time), lastRight[e.side] + t.w / 2 + 1)
+      lastRight[e.side] = cx + t.w / 2
+      const cy = e.side === 'radiant' ? PAD.t + t.h / 2 + 2 : h.value - PAD.b - t.h / 2 - 2
+      return { ...e, cx, cy, ...t }
+    })
+})
+const eventTypesShown = computed(() => Object.entries(EVENT_TYPES)
+  .filter(([type]) => markers.value.some(m => m.type === type))
+  .map(([type, t]) => ({ type, ...t })))
+
+// Events within half a minute of the hovered time, for the tooltip.
+const hoverEvents = computed(() => (hover.value == null ? [] : markers.value.filter(m => Math.abs(m.time - hover.value) <= 30)))
+
 const hoverRows = computed(() => {
   if (hover.value == null) return []
   return scaled.value
@@ -206,6 +238,9 @@ const summary = computed(() => props.series
             <i class="key-line" :class="{ dashed: s.kind === 'probability' }" :style="{ color: s.color }" />{{ s.label }}
           </span>
         </template>
+        <span v-for="t in eventTypesShown" :key="t.type" class="key">
+          <img :src="t.icon" class="key-icon" alt="" />{{ t.label }}
+        </span>
       </span>
     </div>
     <div ref="body" class="chart-body" :style="fill ? { minHeight: `${height}px` } : null">
@@ -265,6 +300,15 @@ const summary = computed(() => props.series
           />
         </template>
 
+        <!-- Objectives: an icon on the taking side's edge (Radiant top, Dire bottom), with a faint tick down to the zero line. -->
+        <g class="markers">
+          <g v-for="m in markers" :key="m.key">
+            <line class="marker-tick" :x1="m.cx" :x2="m.cx" :y1="m.cy" :y2="zeroY" />
+            <image :href="m.icon" :x="m.cx - m.w / 2" :y="m.cy - m.h / 2" :width="m.w" :height="m.h" class="marker-icon" />
+            <title>{{ m.label }} · {{ m.hero?.displayName ?? 'Unknown hero' }} ({{ m.side === 'radiant' ? 'Radiant' : 'Dire' }}) {{ m.verb }} at {{ formatTime(m.time) }}</title>
+          </g>
+        </g>
+
         <g v-if="hover != null">
           <line class="crosshair" :x1="x(hover)" :x2="x(hover)" :y1="PAD.t" :y2="h - PAD.b" />
           <circle
@@ -281,6 +325,11 @@ const summary = computed(() => props.series
 
       <div v-if="hover != null && hoverRows.length" class="tooltip" :style="tooltipStyle">
         <div class="tt-time">{{ formatTime(hover) }}</div>
+        <div v-for="m in hoverEvents" :key="m.key" class="tt-event">
+          <img :src="m.icon" class="key-icon" alt="" />
+          <HeroIcon :hero="m.hero" class="tt-event-hero" />
+          <span>{{ m.label }} · {{ formatTime(m.time) }}</span>
+        </div>
         <div v-for="r in hoverRows" :key="r.s.key" class="tt-row">
           <i :class="{ dashed: !single && r.s.kind === 'probability' }" :style="{ color: single ? sideColor(r.s, r.v) : r.s.color }" />
           <strong>{{ display(r.s, r.v) }}</strong>
@@ -361,6 +410,8 @@ const summary = computed(() => props.series
 .chart-svg:focus-visible { outline: 1px solid var(--color-accent, #34bfff); outline-offset: 2px; border-radius: 4px; }
 
 .zone { fill-opacity: 0.07; }
+.marker-tick { stroke: #7a8799; stroke-opacity: 0.35; stroke-width: 1; stroke-dasharray: 2 3; }
+.marker-icon { cursor: default; }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .grid line { stroke: #2a3140; stroke-width: 1; shape-rendering: crispEdges; }
 .grid line.zero { stroke: #4a5366; }
@@ -405,6 +456,18 @@ const summary = computed(() => props.series
   white-space: nowrap;
 }
 .tt-row strong { color: var(--color-text); font-weight: 700; min-width: 3.2rem; }
+/* The objective icons again, in the legend and tooltip. */
+.key-icon { display: block; height: 14px; width: auto; }
+.tt-event {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--color-muted, #7a8799);
+  white-space: nowrap;
+  margin-bottom: 0.15rem;
+}
+.tt-event :deep(img), .tt-event-hero { width: 18px; height: 18px; border-radius: 3px; object-fit: cover; }
 .tt-heroes {
   margin-top: 0.35rem;
   padding-top: 0.3rem;

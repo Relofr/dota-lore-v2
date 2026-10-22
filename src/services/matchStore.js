@@ -5,9 +5,10 @@
 const DB_NAME = 'dota-lore'
 // Bump whenever the match or playback queries gain fields: the upgrade clears records saved without them.
 // v2: party IDs and player ranks on the match query. v3: win probability (winRates).
-const DB_VERSION = 3
+// v4: rune pickups and tower damage on the match query.
+const DB_VERSION = 4
 // Most entries kept per kind; the least recently used go first.
-const LIMITS = { match: 100, playback: 25 }
+const LIMITS = { match: 100, playback: 25, aegis: 100 }
 
 let dbPromise = null
 

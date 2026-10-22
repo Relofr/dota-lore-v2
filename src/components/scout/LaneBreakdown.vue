@@ -1,4 +1,5 @@
 <script setup>
+import { compact, formatTime } from '@/utils/matchAnalysis.js'
 import HeroIcon from './HeroIcon.vue'
 import LaneOutcome from './LaneOutcome.vue'
 
@@ -8,6 +9,14 @@ defineProps({
   // { text, side } from laneOutcomeText, shown as a badge beside the title.
   outcome: { type: Object, default: null },
 })
+
+// A net worth lead as "Radiant +1.2k", or "Even".
+function leadText(v) {
+  if (!v) return 'Even'
+  return `${v > 0 ? 'Radiant' : 'Dire'} +${compact(Math.abs(v))}`
+}
+
+const leadSide = v => (v > 0 ? 'lead-r' : v < 0 ? 'lead-d' : '')
 
 const NUMBER_PATTERN = /([+−]?\d+(?:[.:]\d+)?k?)/
 
@@ -64,7 +73,27 @@ function share(row) {
       </div>
     </div>
 
-    <ul v-if="breakdown.rotations.length" class="notes">
+    <ul v-if="breakdown.firstKill || breakdown.swing || breakdown.rotations.length" class="notes">
+      <li v-if="breakdown.firstKill">
+        <span class="note-label">First kill</span>
+        <HeroIcon :hero="breakdown.firstKill.killer" class="note-hero" />
+        <span class="note-muted">{{ breakdown.firstKill.isSolo ? 'solo killed' : 'killed' }}</span>
+        <HeroIcon :hero="breakdown.firstKill.victim" class="note-hero" />
+        <span class="note-muted">at {{ formatTime(breakdown.firstKill.time) }}</span>
+      </li>
+      <!-- Net worth lead at halfway and at the cutoff, plus its biggest point if that was somewhere else. -->
+      <li v-if="breakdown.swing">
+        <span class="note-label">{{ breakdown.swing.flipped ? 'Lead flipped' : 'Net worth lead' }}</span>
+        <span :class="leadSide(breakdown.swing.half.lead)">{{ leadText(breakdown.swing.half.lead) }}</span>
+        <span class="note-muted">at {{ breakdown.swing.half.minute }}:00 →</span>
+        <span :class="leadSide(breakdown.swing.end.lead)">{{ leadText(breakdown.swing.end.lead) }}</span>
+        <span class="note-muted">at {{ breakdown.swing.end.minute }}:00</span>
+        <template v-if="![breakdown.swing.half.minute, breakdown.swing.end.minute].includes(breakdown.swing.peak.minute) && breakdown.swing.peak.lead">
+          <span class="note-muted">· peak</span>
+          <span :class="leadSide(breakdown.swing.peak.lead)">{{ leadText(breakdown.swing.peak.lead) }}</span>
+          <span class="note-muted">at {{ breakdown.swing.peak.minute }}:00</span>
+        </template>
+      </li>
       <li v-for="rot in breakdown.rotations" :key="rot.victims">
         <span class="note-label">Ganked {{ rot.victims }}</span>
         <span v-for="k in rot.killers" :key="k.hero?.shortName" class="ganker">
@@ -240,6 +269,9 @@ function share(row) {
   font-size: 0.73rem;
   color: #c9c9c9;
 }
+.note-muted { color: var(--color-muted, #7a8799); }
+.lead-r { color: #4bb45f; font-weight: 600; }
+.lead-d { color: #c83c3c; font-weight: 600; }
 .note-label {
   font-size: 0.62rem;
   font-weight: 700;

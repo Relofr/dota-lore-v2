@@ -88,6 +88,9 @@ export function statsAt(thisMatch, minute = LANE_MINUTE) {
     xp: sumFirst(s.experiencePerMinute, minute),
     networth: s.networthPerMinute[Math.min(minute, s.networthPerMinute.length - 1)],
     heroDamage: sumFirst(s.heroDamagePerMinute, minute),
+    towerDamage: sumFirst(s.towerDamagePerMinute, minute),
+    // Picked up or bottled; either way the rune went to this player.
+    runes: eventsBy(s.runes),
     level: (s.level ?? []).filter(t => t <= cutoff).length,
   }
 }
@@ -280,6 +283,8 @@ export function laneBreakdown(group, allPlayers, outcome, minute = LANE_MINUTE) 
     compareRow('heroDamage', 'Hero damage', total(group.radiant, 'heroDamage'), total(group.dire, 'heroDamage')),
     compareRow('deaths', 'Deaths', deathsR.total, deathsD.total, { lowerIsBetter: true, format: String }),
     compareRow('goldFed', 'Gold given away', deathsR.goldFed, deathsD.goldFed, { lowerIsBetter: true }),
+    compareRow('runes', 'Runes taken', total(group.radiant, 'runes'), total(group.dire, 'runes'), { format: String }),
+    compareRow('towerDamage', 'Tower damage', total(group.radiant, 'towerDamage'), total(group.dire, 'towerDamage')),
   ]
 
   const rotations = [
@@ -323,7 +328,75 @@ export function laneBreakdown(group, allPlayers, outcome, minute = LANE_MINUTE) 
     })
   }
 
-  return { headline: laneHeadline(outcome, rows), rows, rotations, matchups }
+  return {
+    headline: laneHeadline(outcome, rows),
+    rows,
+    rotations,
+    matchups,
+    firstKill: laneFirstKill(all, byHeroId, cutoff),
+    swing: leadSwing(group, minute),
+  }
+}
+
+// The lane's first kill by one of its own players before the cutoff: who, on whom, when.
+function laneFirstKill(players, byHeroId, cutoff) {
+  let first = null
+  for (const p of players) {
+    for (const k of p.thisMatch.stats?.killEvents ?? []) {
+      if (k.time > cutoff || (first && k.time >= first.time)) continue
+      const victim = byHeroId.get(k.target)
+      if (victim) first = { time: k.time, killer: p.thisMatch.hero, victim: victim.thisMatch?.hero, side: p.isRadiant ? 'radiant' : 'dire', isSolo: !!k.isSolo }
+    }
+  }
+  return first
+}
+
+// How the lane's net worth lead moved: at the halfway minute, at the cutoff, and its biggest point.
+function leadSwing(group, minute) {
+  const nwAt = (players, m) => players.reduce((sum, p) => {
+    const nw = p.thisMatch.stats?.networthPerMinute ?? []
+    return sum + (nw[Math.min(m, nw.length - 1)] ?? 0)
+  }, 0)
+  const leads = Array.from({ length: minute + 1 }, (_, m) => nwAt(group.radiant, m) - nwAt(group.dire, m))
+  const peakMinute = leads.reduce((best, v, m) => (Math.abs(v) > Math.abs(leads[best]) ? m : best), 0)
+  const half = Math.round(minute / 2)
+  return {
+    half: { minute: half, lead: leads[half] },
+    end: { minute, lead: leads[minute] },
+    peak: { minute: peakMinute, lead: leads[peakMinute] },
+    // The lead changed hands between the halfway point and the cutoff.
+    flipped: Math.sign(leads[half]) !== 0 && Math.sign(leads[minute]) === -Math.sign(leads[half]),
+  }
+}
+
+// Roshan kills and wisdom runes for marking on the summary chart: [{ key, time, type, side, hero }].
+// Roshan comes from Aegis pickups (fetchAegisPickups), so a denied Aegis leaves no mark.
+export function objectiveEvents(match, aegisPickups = []) {
+  const players = match?.players ?? []
+  const bySlot = new Map(players.map(p => [p.thisMatch?.playerSlot, p]))
+  const events = []
+  aegisPickups.forEach((a, i) => {
+    const p = bySlot.get(a.playerSlot)
+    if (p) events.push({ key: `roshan-${i}`, time: a.time, type: 'roshan', side: p.isRadiant ? 'radiant' : 'dire', hero: p.thisMatch.hero })
+  })
+  for (const p of players) {
+    for (const r of p.thisMatch?.stats?.runes ?? []) {
+      if (r.rune !== 'WISDOM') continue
+      events.push({ key: `wisdom-${p.thisMatch.playerSlot}-${r.time}`, time: r.time, type: 'wisdom', side: p.isRadiant ? 'radiant' : 'dire', hero: p.thisMatch.hero })
+    }
+  }
+  return events.sort((a, b) => a.time - b.time)
+}
+
+// The lane's end-of-game totals, in the same row shape as the breakdown's, for the sidebar's full-game view.
+export function laneTotals(group) {
+  if (!group.radiant.length || !group.dire.length) return []
+  const total = (players, key) => players.reduce((sum, p) => sum + (p.thisMatch?.[key] ?? 0), 0)
+  return [
+    compareRow('networth', 'Net worth', total(group.radiant, 'networth'), total(group.dire, 'networth')),
+    compareRow('lastHits', 'Last hits', total(group.radiant, 'numLastHits'), total(group.dire, 'numLastHits'), { format: String }),
+    compareRow('deaths', 'Deaths', total(group.radiant, 'deaths'), total(group.dire, 'deaths'), { lowerIsBetter: true, format: String }),
+  ]
 }
 
 // Who drew first blood and on whom. Stratz gives only the time, so take the hero death nearest it;

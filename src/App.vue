@@ -2,6 +2,7 @@
 import { RouterView } from "vue-router";
 import AppHeader from "@/components/AppHeader.vue";
 import AppFooter from "@/components/AppFooter.vue";
+import AppToasts from "@/components/AppToasts.vue";
 </script>
 
 <template>
@@ -11,6 +12,7 @@ import AppFooter from "@/components/AppFooter.vue";
       <RouterView />
     </main>
     <AppFooter />
+    <AppToasts />
   </div>
 </template>
 

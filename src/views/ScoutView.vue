@@ -5,6 +5,7 @@ import {
   fetchPlayersData,
   fetchMatchPlayers,
   fetchMatchPlayback,
+  fetchAegisPickups,
   fetchPlayerMatches,
   fetchRankedPeriodPage,
   fetchItems,
@@ -24,6 +25,8 @@ import {
   fineSeries,
   laneBreakdown,
   laneOutcomeText,
+  laneTotals,
+  objectiveEvents,
   gameFacts,
 } from '@/utils/matchAnalysis.js'
 import StratzIcon from '@/components/StratzIcon.vue'
@@ -39,6 +42,7 @@ import MatchupCard from '@/components/scout/MatchupCard.vue'
 import TeamLineup from '@/components/scout/TeamLineup.vue'
 import MatchLinks from '@/components/scout/MatchLinks.vue'
 import { OPENDOTA_ICON, DOTABUFF_ICON } from '@/utils/siteIcons.js'
+import { showToast } from '@/composables/useToast.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -90,6 +94,22 @@ async function loadPlayback(matchId) {
     console.error('[Scout] playback:', err.message)
   }
 }
+
+// Aegis pickups ([{ time, playerSlot }]) stand in for Roshan kills on the summary chart; loaded separately
+// since they come from the large inventory timelines.
+const aegisPickups = ref([])
+
+async function loadAegis(matchId) {
+  try {
+    const pickups = await fetchAegisPickups(matchId)
+    if (match.value?.matchId === matchId) aegisPickups.value = pickups
+  } catch (err) {
+    console.error('[Scout] aegis:', err.message)
+  }
+}
+
+// Roshan kills and wisdom runes, marked on the summary chart.
+const objectives = computed(() => objectiveEvents(match.value, aegisPickups.value))
 
 const laneGroups = computed(() => groupByLane(players.value).map(group => {
   const outcome = laneOutcomeText(match.value?.laneOutcomes?.[group.key])
@@ -307,6 +327,12 @@ function matchStatRows(p) {
   ]
 }
 
+// The role a player played (Carry, Mid, Offlane, Soft Support, Hard Support), for under their lineup
+// card; null when Stratz hasn't assigned positions (e.g. unparsed).
+function positionName(p) {
+  return POSITION_LABELS[p.thisMatch?.position] ?? null
+}
+
 function positionText(p) {
   const pos = p.thisMatch?.position
   const n = /POSITION_(\d)/.exec(pos ?? '')?.[1]
@@ -411,6 +437,10 @@ function playerAvatar(p) {
   return playerData.value[p.accountId]?.steamAccount?.avatar || p.avatar || null
 }
 
+function imageLoadOnError(e) {
+  e.target.src = "https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg"
+}
+
 function playerName(p) {
   if (!p.accountId) return 'Anonymous'
   return playerData.value[p.accountId]?.steamAccount?.name || p.name
@@ -466,8 +496,9 @@ async function loadAllPlayerData() {
   try {
     playerData.value = await fetchPlayersData(ids)
   } catch (err) {
+    // Stratz's raw errors are long and technical; the detail stays in the console.
     console.error('[Scout] player data:', err.message)
-    error.value = `Couldn't load player stats: ${err.message}`
+    showToast('Couldn’t retrieve player data from Stratz. Try again in a moment.')
   } finally {
     for (const id of ids) dataLoading.value[id] = false
   }
@@ -543,6 +574,7 @@ function resetState() {
   periodLoading.value = {}
   historyOpen.value = {}
   playback.value = null
+  aegisPickups.value = []
   error.value = null
 }
 
@@ -607,6 +639,7 @@ async function loadByMatchId(mid) {
     if (match.value.isParsed) {
       loadAllPlayerData()
       loadPlayback(data.id)
+      loadAegis(data.id)
       loadItems()
     }
   } catch (err) {
@@ -730,7 +763,10 @@ async function loadByMatchId(mid) {
         <div class="lineups roster-lineups">
           <TeamLineup v-for="team in rosterTeams" :key="team.key" :team="team" :reserve-party="anyParty" hide-head>
             <template #default="{ player }">
-              <MatchupCard :player="player" />
+              <div class="lineup-slot">
+                <MatchupCard :player="player" />
+                <span class="lineup-pos">{{ positionName(player) ?? '—' }}</span>
+              </div>
             </template>
           </TeamLineup>
         </div>
@@ -781,6 +817,8 @@ async function loadByMatchId(mid) {
               :key="group.key"
               :group="group"
               :active="activeSection === `lane-${group.key}`"
+              :rows="view === 'laning' ? group.breakdown?.rows ?? [] : laneTotals(group)"
+              :stats-label="view === 'laning' ? `At ${LANE_MINUTE}:00` : 'End of Game'"
               @select="scrollToLane"
             />
           </div>
@@ -816,15 +854,18 @@ async function loadByMatchId(mid) {
         <div class="lineups">
           <TeamLineup v-for="team in rosterTeams" :key="team.key" :team="team" :reserve-party="anyParty" hide-head>
             <template #default="{ player }">
-              <button
-                type="button"
-                class="lineup-tile"
-                :disabled="!laneKeyOf(player)"
-                :title="`${player.thisMatch?.hero?.displayName ?? 'Hero'} · ${playerName(player)}: jump to their lane`"
-                @click="scrollToLane(laneKeyOf(player))"
-              >
-                <MatchupCard :player="player" :stats="view === 'laning' ? statsAt(player.thisMatch) : null" />
-              </button>
+              <div class="lineup-slot">
+                <button
+                  type="button"
+                  class="lineup-tile"
+                  :disabled="!laneKeyOf(player)"
+                  :title="`${player.thisMatch?.hero?.displayName ?? 'Hero'} · ${playerName(player)}: jump to their lane`"
+                  @click="scrollToLane(laneKeyOf(player))"
+                >
+                  <MatchupCard :player="player" :stats="view === 'laning' ? statsAt(player.thisMatch) : null" />
+                </button>
+                <span class="lineup-pos">{{ positionName(player) ?? '—' }}</span>
+              </div>
             </template>
           </TeamLineup>
         </div>
@@ -842,7 +883,7 @@ async function loadByMatchId(mid) {
                 @click="toggleTeamMetric(tm.key)"
               >{{ tm.tab }}</button>
             </div>
-            <AdvantageChart :series="teamSeries" title="Team Advantage" :height="170" fill />
+            <AdvantageChart :series="teamSeries" :events="objectives" title="Team Advantage" :height="170" fill />
           </div>
           <div v-if="facts.length" class="facts-card">
             <div class="section-label">{{ view === 'laning' ? `Laning · 0–${LANE_MINUTE} min` : 'Match' }}</div>
@@ -913,9 +954,18 @@ async function loadByMatchId(mid) {
               <div v-if="!p" class="player-card-spacer" />
               <div v-else class="player-card" :class="side === 0 ? 'card-radiant' : 'card-dire'">
 
+                <!-- The hero leads the card, so facing cards read as hero against hero; the player comes second. -->
+                <div v-if="p.thisMatch" class="hero-banner">
+                  <HeroIcon :hero="p.thisMatch.hero" wide class="hero-banner-icon" />
+                  <div class="hero-banner-text">
+                    <span class="hero-banner-name">{{ p.thisMatch.hero?.displayName ?? 'Unknown hero' }}</span>
+                    <span v-if="positionText(p)" class="hero-banner-pos">{{ positionText(p) }}</span>
+                  </div>
+                </div>
+
                 <div class="player-header">
-                  <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" />
-                  <div v-else class="avatar avatar-empty" />
+                  <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" @error="imageLoadOnError"/>
+                  <div v-else class="avatar avatar-empty"/>
                   <div class="player-info">
                     <div class="name-row">
                       <span class="name-main">
@@ -965,11 +1015,6 @@ async function loadByMatchId(mid) {
                 </div>
 
                 <template v-if="p.thisMatch">
-                  <div class="hero-line">
-                    <HeroIcon :hero="p.thisMatch.hero" wide class="hero-line-icon" />
-                    <span v-if="positionText(p)" class="hero-line-pos">{{ positionText(p) }}</span>
-                  </div>
-
                   <table class="tm-table">
                     <thead>
                       <tr>
@@ -1233,29 +1278,36 @@ async function loadByMatchId(mid) {
   align-items: start;
 }
 .match-content { min-width: 0; }
+/* Fills the screen below the header. Spacing is kept tight so everything fits; on a very short window it
+   still scrolls, but without a visible scrollbar. */
 .match-nav {
   position: sticky;
   top: 80px;
+  height: calc(100vh - 96px);
+  overflow-y: auto;
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.9rem;
+  gap: 0.5rem;
+  padding: 0.65rem;
   background: var(--color-surface, #1a1f2b);
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 10px;
 }
+.match-nav::-webkit-scrollbar { display: none; }
 .nav-toggle {
-  padding-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--color-border, #2e3542);
 }
-.nav-lanes { display: flex; flex-direction: column; gap: 0.6rem; }
+/* Takes the sidebar's spare height and spreads the cards evenly through it (the gap is the minimum). */
+.nav-lanes { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; gap: 0.4rem; }
 /* Same frame as the lane cards, for jumping back up to the summary. */
 .nav-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.65rem 0.75rem;
+  padding: 0.5rem 0.7rem;
   font: inherit;
   color: var(--color-text);
   background: rgba(255,255,255,.02);
@@ -1282,7 +1334,7 @@ async function loadByMatchId(mid) {
 /* Narrower screens: the sidebar sits above the sections and the lanes go across. */
 @media (max-width: 1100px) {
   .match-layout { grid-template-columns: minmax(0, 1fr); }
-  .match-nav { position: static; }
+  .match-nav { position: static; height: auto; overflow: visible; }
   .nav-lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
@@ -1312,6 +1364,17 @@ async function loadByMatchId(mid) {
   border-bottom: 1px solid var(--color-border, #2e3542);
 }
 /* Each player's card in the lineup jumps to the lane they were in. */
+/* A lineup card with the player's position named underneath. */
+.lineup-slot { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.lineup-slot > :first-child { flex: 1; }
+.lineup-pos {
+  text-align: center;
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-muted, #7a8799);
+}
 .lineup-tile {
   display: flex;
   min-width: 0;
@@ -1532,13 +1595,14 @@ async function loadByMatchId(mid) {
 }
 .avatar {
   align-self: center;
-  width: 64px;
-  height: 64px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
   background: var(--color-border, #2e3542);
 }
+
 .player-info {
   flex: 1;
   min-width: 0;
@@ -1596,7 +1660,7 @@ async function loadByMatchId(mid) {
 }
 .player-name {
   min-width: 0;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--color-text);
   white-space: nowrap;
@@ -1621,19 +1685,34 @@ async function loadByMatchId(mid) {
   letter-spacing: 0.04em;
 }
 
-.hero-line {
+/* The hero's portrait and name head the card; a rule separates them from the player below. */
+.hero-banner {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.75rem;
   min-width: 0;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--color-border, #2e3542);
 }
-.hero-line-icon {
-  width: 52px;
-  height: 29px;
-  border-radius: 4px;
+.hero-banner-icon {
+  flex-shrink: 0;
+  width: 96px;
+  height: 54px;
+  border-radius: 5px;
 }
-.hero-line-pos {
-  font-size: 0.7rem;
+.hero-banner-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.hero-banner-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-banner-pos {
+  font-size: 0.72rem;
   color: var(--color-muted, #7a8799);
   white-space: nowrap;
 }

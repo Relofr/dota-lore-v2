@@ -224,6 +224,40 @@ async function loadMatchPlayback(matchId) {
   return data.match?.players ?? []
 }
 
+const AEGIS = 117
+const aegisCache = cache(20)
+
+// When each Aegis was picked up and by whom: [{ time, playerSlot }]. Stratz has no Roshan killer, so the
+// Aegis appearing in an inventory stands in for the kill. The inventory timelines behind it are large,
+// so only the pickups are kept.
+export function fetchAegisPickups(matchId) {
+  return aegisCache(String(matchId), () => storedOrFetched('aegis', matchId, () => loadAegisPickups(matchId), () => true))
+}
+
+async function loadAegisPickups(matchId) {
+  const slots = ['item0', 'item1', 'item2', 'item3', 'item4', 'item5', 'backPack0', 'backPack1', 'backPack2']
+  const data = await stratzQuery(`{
+    match(id: ${matchId}) {
+      players {
+        playerSlot
+        playbackData {
+          inventoryEvents { time ${slots.map(sl => `${sl} { itemId }`).join(' ')} }
+        }
+      }
+    }
+  }`)
+  const pickups = []
+  for (const p of data.match?.players ?? []) {
+    let had = false
+    for (const e of [...(p.playbackData?.inventoryEvents ?? [])].sort((a, b) => a.time - b.time)) {
+      const has = slots.some(sl => e[sl]?.itemId === AEGIS)
+      if (has && !had) pickups.push({ time: e.time, playerSlot: p.playerSlot })
+      had = has
+    }
+  }
+  return pickups.sort((a, b) => a.time - b.time)
+}
+
 // Unparsed matches aren't kept even for the session, so every load asks Stratz whether parsing has finished.
 export function fetchMatchPlayers(matchId) {
   const key = String(matchId)
@@ -302,7 +336,9 @@ async function loadMatchPlayers(matchId) {
           experiencePerMinute
           networthPerMinute
           heroDamagePerMinute
+          towerDamagePerMinute
           level
+          runes { time rune action }
           killEvents { time target isSolo isGank }
           deathEvents { time attacker goldFed timeDead }
           assistEvents { time }
