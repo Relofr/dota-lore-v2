@@ -17,10 +17,11 @@ export function heroImage(hero, wide = false) {
   return wide ? `${HERO_BANNER}/${hero.shortName}_horz.png` : `${HERO_ICON}/${hero.shortName}.png`
 }
 
+// Top to bottom, the order the lanes appear in the sidebar and on the page.
 const MAP_LANES = [
-  { key: 'bottom', label: 'Bottom Lane', short: 'Bottom', radiantRole: 'Safe lane', direRole: 'Off lane' },
-  { key: 'mid', label: 'Mid Lane', short: 'Mid', radiantRole: 'Mid', direRole: 'Mid' },
   { key: 'top', label: 'Top Lane', short: 'Top', radiantRole: 'Off lane', direRole: 'Safe lane' },
+  { key: 'mid', label: 'Mid Lane', short: 'Mid', radiantRole: 'Mid', direRole: 'Mid' },
+  { key: 'bottom', label: 'Bottom Lane', short: 'Bottom', radiantRole: 'Safe lane', direRole: 'Off lane' },
   { key: 'other', label: 'Jungle / Roaming' },
 ]
 
