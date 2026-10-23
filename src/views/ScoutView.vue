@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   fetchPlayersData,
   fetchMatchPlayers,
   fetchMatchPlayback,
   fetchAegisPickups,
+  fetchAssistEvents,
   fetchPlayerMatches,
   fetchRankedPeriodPage,
   fetchItems,
@@ -41,8 +42,10 @@ import LaneOutcome from '@/components/scout/LaneOutcome.vue'
 import MatchupCard from '@/components/scout/MatchupCard.vue'
 import TeamLineup from '@/components/scout/TeamLineup.vue'
 import MatchLinks from '@/components/scout/MatchLinks.vue'
+import MatchIdCopy from '@/components/scout/MatchIdCopy.vue'
 import { OPENDOTA_ICON, DOTABUFF_ICON } from '@/utils/siteIcons.js'
 import { showToast } from '@/composables/useToast.js'
+import { fetchOpenDotaMatch, fetchOpenDotaPlayers, requestOpenDotaParse } from '@/services/openDotaApi.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -53,8 +56,8 @@ const match = ref(null)
 const view = ref('laning')
 // The stat row under the pointer, as `lane:pair:label`, so the facing hero's card lights the same row.
 const hoveredStat = ref(null)
-// The summary chart's measures, overlaid when more than one is picked; all of them to start.
-const teamMetrics = ref(['heroDamage', 'winProbability', 'networth', 'experience'])
+// The summary chart's measures, overlaid when more than one is picked; the team ones to start.
+const teamMetrics = ref(['winProbability', 'networth', 'experience'])
 // Each lane chart's picked measures by lane key; a lane not in here shows hero damage only.
 const laneMetrics = ref({})
 const itemMap = ref(new Map())
@@ -105,6 +108,21 @@ async function loadAegis(matchId) {
     if (match.value?.matchId === matchId) aegisPickups.value = pickups
   } catch (err) {
     console.error('[Scout] aegis:', err.message)
+  }
+}
+
+// A match from OpenDota has no assist times; Stratz's are merged in when it has them, so assists at
+// 10:00 show a number. Until then (or if Stratz can't help) they show as "—".
+async function loadAssists(matchId) {
+  try {
+    const bySlot = await fetchAssistEvents(matchId)
+    if (!bySlot || match.value?.matchId !== matchId) return
+    for (const p of match.value.players) {
+      const events = bySlot[p.thisMatch?.playerSlot]
+      if (events && p.thisMatch.stats) p.thisMatch.stats.assistEvents = events
+    }
+  } catch (err) {
+    console.error('[Scout] assists:', err.message)
   }
 }
 
@@ -215,37 +233,58 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
 
 // Line colours for when measures are overlaid: a validated set (all pairs, dark surface #1a1f2b) that
 // stays clear of the Radiant green and Dire red. Win probability is dashed in a neutral, as it isn't a lead.
+// `label` titles the chart when a measure is shown alone; `short` heads its column in the tooltip.
+// `split` measures are team-level, drawn Radiant above and Dire below the zero line; the others are drawn
+// hero by hero as plain lines. The two kinds can't share a chart, so picking one clears the other.
 const TEAM_METRICS = [
-  { key: 'heroDamage', tab: 'Hero Damage', label: 'Team Damage', color: '#d55181' },
-  { key: 'winProbability', tab: 'Win Probability', label: 'Win Probability', color: '#c3c8d2', kind: 'probability' },
-  { key: 'networth', tab: 'Net Worth', label: 'Team Net Worth', color: '#c98500' },
-  { key: 'experience', tab: 'Experience', label: 'Team Experience', color: '#3987e5' },
+  { key: 'heroDamage', tab: 'Hero Damage', label: 'Hero Damage', short: 'Damage', color: '#d55181' },
+  { key: 'winProbability', tab: 'Win Probability', label: 'Win Probability', color: '#c3c8d2', kind: 'probability', split: true },
+  { key: 'networth', tab: 'Net Worth', label: 'Team Net Worth', short: 'Net Worth', color: '#c98500', split: true },
+  { key: 'experience', tab: 'Experience', label: 'Team Experience', short: 'XP', color: '#3987e5', split: true },
 ]
+
+// A measure drawn hero by hero: each one's running total as a plain line. Experience also marks each
+// level-up on the line. `leads` is a leadSeries() result, which carries every hero's series.
+function heroSeries(m, leads) {
+  return {
+    ...m,
+    kind: 'perHero',
+    step: leads.step,
+    heroes: leads.heroes.map(h => ({
+      key: h.player.thisMatch.playerSlot ?? h.player.heroId,
+      hero: h.player.thisMatch.hero,
+      isRadiant: h.player.isRadiant,
+      values: windowed(h[m.key], leads.step),
+      // Level 1 is at the start, so only the level-ups after it.
+      dots: m.key === 'experience' ? (h.player.thisMatch.stats?.level ?? []).slice(1) : null,
+    })),
+  }
+}
 
 const teamLeads = computed(() =>
   leadSeries(players.value.filter(p => p.isRadiant), players.value.filter(p => !p.isRadiant), fine.value))
 
-// Stratz has team-level leads for net worth and XP only; damage is summed from the players.
-function teamMetricSeries(metric) {
+// Team measures are Radiant-minus-Dire lines (win probability as Radiant's chance); hero damage is hero by hero.
+function teamMetricSeries(tm) {
   const m = match.value
-  if (metric === 'winProbability') {
-    return m.winRates?.length ? { values: windowed(m.winRates), step: 60 } : null
+  if (tm.key === 'winProbability') {
+    return m.winRates?.length ? { ...tm, values: windowed(m.winRates), step: 60 } : null
   }
-  if (fine.value || metric === 'heroDamage') {
-    const leads = teamLeads.value
-    if (leads) return { values: windowed(leads[metric], leads.step), step: leads.step }
-    if (metric === 'heroDamage') return null
-  }
-  const source = metric === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
-  return source?.length ? { values: windowed(source), step: 60 } : null
+  if (!tm.split) return teamLeads.value ? heroSeries(tm, teamLeads.value) : null
+  const lead = { ...tm, kind: 'lead' }
+  // Per-second in the laning view once playback is in; otherwise Stratz's own per-minute team leads.
+  if (fine.value && teamLeads.value) return { ...lead, values: windowed(teamLeads.value[tm.key], teamLeads.value.step), step: teamLeads.value.step }
+  const source = tm.key === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
+  if (source?.length) return { ...lead, values: windowed(source), step: 60 }
+  return teamLeads.value ? { ...lead, values: windowed(teamLeads.value[tm.key], teamLeads.value.step), step: teamLeads.value.step } : null
 }
 
 // Every measure this match has data for, so a chip only shows when it can draw something.
 const teamAvailable = computed(() => {
   if (!match.value) return []
   return TEAM_METRICS
-    .map(tm => ({ ...tm, kind: tm.kind ?? 'lead', ...teamMetricSeries(tm.key) }))
-    .filter(tm => tm.values?.length)
+    .map(teamMetricSeries)
+    .filter(s => s?.values?.length || s?.heroes?.some(hr => hr.values.length))
 })
 
 const teamSeries = computed(() => {
@@ -260,8 +299,11 @@ function toggled(shown, key) {
   return shown.length > 1 ? shown.filter(k => k !== key) : shown
 }
 
+// Picking a measure of the other kind (team vs hero by hero) starts the chart over with just that one.
 function toggleTeamMetric(key) {
-  teamMetrics.value = toggled(teamSeries.value.map(s => s.key), key)
+  const shown = teamSeries.value.map(s => s.key)
+  const isSplit = k => !!TEAM_METRICS.find(tm => tm.key === k)?.split
+  teamMetrics.value = shown.length && isSplit(shown[0]) !== isSplit(key) ? [key] : toggled(shown, key)
 }
 
 const teamKills = computed(() => {
@@ -281,16 +323,14 @@ function windowed(values, step = 60) {
   return view.value === 'laning' ? values.slice(0, (LANE_MINUTE * 60) / step + 1) : values
 }
 
-// Same order and colours as the summary chart's leads.
+// Same measures, order and colours as the summary chart, minus win probability; all hero by hero here.
 const LANE_METRICS = TEAM_METRICS
   .filter(tm => tm.kind !== 'probability')
-  .map(tm => ({ ...tm, label: tm.label.replace('Team', 'Lane'), kind: 'lead' }))
+  .map(({ split, ...tm }) => ({ ...tm, label: tm.label.replace('Team ', '') }))
 
 function laneSeries(group) {
   const picked = laneMetrics.value[group.key] ?? ['heroDamage']
-  return LANE_METRICS
-    .filter(m => picked.includes(m.key))
-    .map(m => ({ ...m, values: windowed(group.leads[m.key], group.leads.step), step: group.leads.step }))
+  return LANE_METRICS.filter(m => picked.includes(m.key)).map(m => heroSeries(m, group.leads))
 }
 
 function toggleLaneMetric(group, key) {
@@ -302,16 +342,6 @@ function laneExtras(group) {
   return [{ label: 'Last hits', values: windowed(group.leads.lastHits, group.leads.step), step: group.leads.step }]
 }
 
-function laneHeroes(group) {
-  const leads = group.leads
-  return leads.heroes.map(h => ({
-    key: h.player.thisMatch.playerSlot ?? h.player.heroId,
-    hero: h.player.thisMatch.hero,
-    isRadiant: h.player.isRadiant,
-    values: Object.fromEntries(LANE_METRICS.map(m => [m.key, windowed(h[m.key], leads.step)])),
-  }))
-}
-
 // This player's stats as rows, @10 and end of game side by side, for the vertical table on each card.
 function matchStatRows(p) {
   const m = p.thisMatch
@@ -319,7 +349,7 @@ function matchStatRows(p) {
   const pair = (a, b) => (a == null || b == null ? '—' : `${a} / ${b}`)
   return [
     { label: 'Level', at: at?.level, total: m.level },
-    { label: 'K / D / A', at: at && `${at.kills} / ${at.deaths} / ${at.assists}`, total: `${m.kills} / ${m.deaths} / ${m.assists}` },
+    { label: 'K / D / A', at: at && `${at.kills} / ${at.deaths} / ${at.assists ?? '—'}`, total: `${m.kills} / ${m.deaths} / ${m.assists}` },
     { label: 'LH / DN', at: at && pair(at.lastHits, at.denies), total: pair(m.numLastHits, m.numDenies) },
     { label: 'GPM / XPM', at: at && pair(at.gpm, at.xpm), total: pair(m.goldPerMinute, m.experiencePerMinute) },
     { label: 'Net worth', at: at && compact(at.networth), total: m.networth != null ? compact(m.networth) : null },
@@ -433,12 +463,16 @@ function overallRecord(p) {
   }
 }
 
+// Avatar URLs that failed to load; those players get the user icon instead.
+const brokenAvatars = ref(new Set())
+
 function playerAvatar(p) {
-  return playerData.value[p.accountId]?.steamAccount?.avatar || p.avatar || null
+  const url = playerData.value[p.accountId]?.steamAccount?.avatar || p.avatar || null
+  return url && !brokenAvatars.value.has(url) ? url : null
 }
 
-function imageLoadOnError(e) {
-  e.target.src = "https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg"
+function onAvatarError(url) {
+  brokenAvatars.value = new Set(brokenAvatars.value).add(url)
 }
 
 function playerName(p) {
@@ -497,8 +531,10 @@ async function loadAllPlayerData() {
     playerData.value = await fetchPlayersData(ids)
   } catch (err) {
     // Stratz's raw errors are long and technical; the detail stays in the console.
-    console.error('[Scout] player data:', err.message)
-    showToast('Couldn’t retrieve player data from Stratz. Try again in a moment.')
+    console.error('[Scout] player data, trying OpenDota:', err.message)
+    const backup = await fetchOpenDotaPlayers(ids)
+    if (Object.values(backup).some(Boolean)) playerData.value = backup
+    else showToast('Couldn’t retrieve player data from Stratz or OpenDota. Try again in a moment.')
   } finally {
     for (const id of ids) dataLoading.value[id] = false
   }
@@ -507,6 +543,11 @@ async function loadAllPlayerData() {
 async function showMoreMatches(accountId) {
   const data = playerData.value[accountId]
   if (!data || moreLoading.value[accountId]) return
+  if (data.source === 'opendota') {
+    data.matches = data.allMatches.slice(0, data.matches.length + 10)
+    if (data.matches.length >= data.allMatches.length) noMoreMatches.value[accountId] = true
+    return
+  }
   moreLoading.value[accountId] = true
   try {
     const more = await fetchPlayerMatches(accountId, data.matches.length)
@@ -535,10 +576,12 @@ async function requestParse() {
   const id = match.value?.matchId
   if (!id || parseState.value === 'sending') return
   parseState.value = 'sending'
-  try {
-    parseState.value = (await requestMatchParse(id)) ? 'sent' : 'refused'
-  } catch (err) {
-    parseError.value = err.message
+  const [stratz, openDota] = await Promise.allSettled([requestMatchParse(id), requestOpenDotaParse(id)])
+  if (stratz.value || openDota.value) parseState.value = 'sent'
+  else if (stratz.status === 'fulfilled' || openDota.status === 'fulfilled') parseState.value = 'refused'
+  else {
+    console.error('[Scout] parse request:', stratz.reason?.message, openDota.reason?.message)
+    parseError.value = 'neither Stratz nor OpenDota could be reached'
     parseState.value = 'error'
   }
 }
@@ -551,11 +594,12 @@ async function checkParsed() {
   stillUnparsed.value = false
   forgetMatch(id)
   try {
-    const data = await fetchMatchPlayers(String(id))
+    const { data } = await fetchMatchFromEither(String(id))
     if (isParsedMatch(data)) await loadByMatchId(String(id))
     else stillUnparsed.value = true
   } catch (err) {
-    parseError.value = err.message
+    console.error('[Scout] parse check:', err.message)
+    parseError.value = 'couldn’t reach Stratz or OpenDota'
     parseState.value = 'error'
   } finally {
     parseChecking.value = false
@@ -578,6 +622,40 @@ function resetState() {
   error.value = null
 }
 
+// Once the page's search row scrolls up under the sticky site header (64px), a compact copy shows in the
+// header instead; it goes away again when the row comes back into view.
+const HEADER_HEIGHT = 64
+const searchRow = ref(null)
+const searchInView = ref(true)
+let searchObserver = null
+onMounted(() => {
+  searchObserver = new IntersectionObserver(
+    ([entry]) => { searchInView.value = entry.isIntersecting },
+    { rootMargin: `-${HEADER_HEIGHT}px 0px 0px 0px` },
+  )
+  searchObserver.observe(searchRow.value)
+})
+onBeforeUnmount(() => searchObserver?.disconnect())
+
+// Keyboard shortcuts for a loaded, parsed match: 1 = laning view, 2 = full game. Ignored while typing
+// in a field or with a modifier held, so they never clash with text entry or browser shortcuts.
+const VIEW_KEYS = { 1: 'laning', 2: 'full' }
+function onHotkey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return
+  const el = e.target
+  if (el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
+  if (!match.value?.isParsed || !VIEW_KEYS[e.key]) return
+  view.value = VIEW_KEYS[e.key]
+}
+onMounted(() => window.addEventListener('keydown', onHotkey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onHotkey))
+
+// Empties the match ID and puts the cursor back in whichever input the clear button belongs to.
+function clearInput(e) {
+  matchIdInput.value = ''
+  e.currentTarget.parentElement.querySelector('input')?.focus()
+}
+
 // The match ID lives in the URL (?match=…) so results can be shared; searching pushes a new URL and the
 // watcher below does the loading, which also covers opening a shared link and the back button.
 function searchMatch() {
@@ -587,17 +665,28 @@ function searchMatch() {
   else router.push({ query: { ...route.query, match: mid } })
 }
 
-watch(
-  () => route.query.match,
-  mid => {
-    if (typeof mid !== 'string' || !mid) return
-    matchIdInput.value = mid
-    loadByMatchId(mid)
-  },
-  { immediate: true },
-)
-
 const MIN_LOADING_MS = 450
+// How long Stratz gets to return a parsed match before OpenDota is asked too.
+const STRATZ_GRACE_MS = 4000
+
+const settle = promise => promise.then(value => ({ ok: true, value }), reason => ({ ok: false, reason }))
+
+// Stratz first, as it has the most (lane outcomes, win probability, per-second playback). If it fails, is
+// slow, or hasn't parsed the match, OpenDota fills in: its parsed data beats an unparsed Stratz match.
+// Resolves to { data, source }; rejects only when neither has the match.
+async function fetchMatchFromEither(mid) {
+  const stratz = settle(fetchMatchPlayers(mid))
+  let sz = await Promise.race([stratz, new Promise(resolve => setTimeout(() => resolve(null), STRATZ_GRACE_MS))])
+  if (sz?.ok && isParsedMatch(sz.value)) return { data: sz.value, source: 'stratz' }
+
+  const od = await settle(fetchOpenDotaMatch(mid))
+  if (od.ok && isParsedMatch(od.value)) return { data: od.value, source: 'opendota' }
+  sz ??= await stratz
+  if (sz.ok && sz.value?.players?.length) return { data: sz.value, source: 'stratz' }
+  if (od.ok && od.value?.players?.length) return { data: od.value, source: 'opendota' }
+  console.error('[Scout] match:', sz.reason?.message, od.reason?.message)
+  throw new Error(`Couldn’t load match ${mid} from Stratz or OpenDota.`)
+}
 
 async function loadByMatchId(mid) {
   // The ID is interpolated into the GraphQL query, and shared links make it user-controlled.
@@ -610,7 +699,7 @@ async function loadByMatchId(mid) {
   resetState()
   const started = Date.now()
   try {
-    const data = await fetchMatchPlayers(mid)
+    const { data, source } = await fetchMatchFromEither(mid)
     // Cached matches come back instantly; hold the loading state briefly so a reload visibly happens.
     await new Promise(resolve => setTimeout(resolve, Math.max(0, MIN_LOADING_MS - (Date.now() - started))))
     if (!data?.players?.length) {
@@ -620,6 +709,7 @@ async function loadByMatchId(mid) {
     match.value = {
       ...data,
       matchId: data.id,
+      source,
       isParsed: isParsedMatch(data),
       laneOutcomes: {
         top: data.topLaneOutcome,
@@ -638,9 +728,15 @@ async function loadByMatchId(mid) {
     // Unparsed matches only show the roster, whose names and avatars come with the match, so skip the rest.
     if (match.value.isParsed) {
       loadAllPlayerData()
-      loadPlayback(data.id)
-      loadAegis(data.id)
       loadItems()
+      // OpenDota lists Aegis pickups itself and has no per-second playback.
+      if (source === 'opendota') {
+        aegisPickups.value = data.aegisPickups ?? []
+        loadAssists(data.id)
+      } else {
+        loadPlayback(data.id)
+        loadAegis(data.id)
+      }
     }
   } catch (err) {
     error.value = err.message
@@ -648,19 +744,45 @@ async function loadByMatchId(mid) {
     loading.value = false
   }
 }
+
+// Runs immediately (to load a shared link), so it stays last: everything loadByMatchId reaches, like
+// `settle` and STRATZ_GRACE_MS, has to be initialised before it fires.
+watch(
+  () => route.query.match,
+  mid => {
+    if (typeof mid !== 'string' || !mid) return
+    matchIdInput.value = mid
+    loadByMatchId(mid)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
   <div class="scout-page">
     <header class="scout-header">
       <h1 class="scout-title">Match Scout</h1>
-      <div class="search-row">
-        <input
-          v-model="matchIdInput"
-          class="match-input"
-          placeholder="Match ID"
-          @keydown.enter="searchMatch"
-        />
+      <div ref="searchRow" class="search-row">
+        <span class="input-wrap">
+          <input
+            v-model="matchIdInput"
+            class="match-input"
+            placeholder="Match ID"
+            @keydown.enter="searchMatch"
+          />
+          <button
+            v-if="matchIdInput"
+            type="button"
+            class="clear-btn"
+            title="Clear"
+            aria-label="Clear match ID"
+            @click="clearInput($event)"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            </svg>
+          </button>
+        </span>
         <button class="load-btn" :disabled="loading" :aria-busy="loading" @click="searchMatch">
           <svg class="spin-icon" :class="{ spinning: loading }" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
             <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
@@ -671,6 +793,42 @@ async function loadByMatchId(mid) {
       </div>
       <p v-if="error" class="error-msg">{{ error }}</p>
     </header>
+
+    <!-- The same search, compact, in the site header while the one above is scrolled out of view. -->
+    <Teleport to="#header-slot" defer>
+      <Transition name="header-search">
+        <div v-if="!searchInView" class="header-search">
+          <span class="input-wrap header-input-wrap">
+            <input
+              v-model="matchIdInput"
+              class="match-input header-search-input"
+              placeholder="Match ID"
+              aria-label="Match ID"
+              @keydown.enter="searchMatch"
+            />
+            <button
+              v-if="matchIdInput"
+              type="button"
+              class="clear-btn"
+              title="Clear"
+              aria-label="Clear match ID"
+              @click="clearInput($event)"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+              </svg>
+            </button>
+          </span>
+          <button class="load-btn header-search-btn" :disabled="loading" :aria-busy="loading" @click="searchMatch">
+            <svg class="spin-icon" :class="{ spinning: loading }" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+              <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+              <path d="M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            {{ loading ? 'Loading…' : 'Load Match' }}
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- Placeholder shaped like the summary and a lane while the match loads. -->
     <div v-if="loading && !match" class="match-layout scout-skeleton" aria-busy="true" aria-label="Loading match">
@@ -714,10 +872,10 @@ async function loadByMatchId(mid) {
         <div class="parse-text">
           <strong>This match hasn't been parsed yet</strong>
           <span>
-            Stratz hasn't processed the replay
+            Neither Stratz nor OpenDota has processed the replay
           </span>
-          <span v-if="parseState === 'sent'" class="parse-note parse-ok">Parse requested. It can take a few minutes, so check again shortly.</span>
-          <span v-else-if="parseState === 'refused'" class="parse-note parse-bad">Stratz couldn't queue this match. The replay may no longer be available.</span>
+          <span v-if="parseState === 'sent'" class="parse-note parse-ok">Parse requested from Stratz and OpenDota. It can take a few minutes, so check again shortly.</span>
+          <span v-else-if="parseState === 'refused'" class="parse-note parse-bad">Neither Stratz nor OpenDota could queue this match. The replay may no longer be available.</span>
           <span v-else-if="parseState === 'error'" class="parse-note parse-bad">Something went wrong: {{ parseError }}</span>
           <span v-if="stillUnparsed && parseState !== 'error'" class="parse-note">Still not parsed.</span>
         </div>
@@ -742,7 +900,10 @@ async function loadByMatchId(mid) {
       <!-- Unparsed: just who played what, until Stratz has the replay. -->
       <section v-if="!match.isParsed" class="panel roster">
         <div class="panel-head">
-          <h2 class="lane-title">Matchup</h2>
+          <div class="panel-title">
+            <h2 class="lane-title">Matchup</h2>
+            <MatchIdCopy :match-id="match.matchId" />
+          </div>
           <MatchLinks :match-id="match.matchId" />
         </div>
         <!-- Same header as a parsed match's summary, with "vs" where the score would be. -->
@@ -781,14 +942,18 @@ async function loadByMatchId(mid) {
               role="tab"
               :aria-selected="view === 'laning'"
               :class="{ active: view === 'laning' }"
+              aria-keyshortcuts="1"
+              title="Shortcut: 1"
               @click="view = 'laning'"
-            >Laning · 0–{{ LANE_MINUTE }}</button>
+            >Laning · 0–{{ LANE_MINUTE }}<kbd class="hotkey" aria-hidden="true">1</kbd></button>
             <button
               role="tab"
               :aria-selected="view === 'full'"
               :class="{ active: view === 'full' }"
+              aria-keyshortcuts="2"
+              title="Shortcut: 2"
               @click="view = 'full'"
-            >Full Game</button>
+            >Full Game<kbd class="hotkey" aria-hidden="true">2</kbd></button>
           </div>
           </div>
 
@@ -828,7 +993,10 @@ async function loadByMatchId(mid) {
       <!-- Overview -->
       <section id="overview" data-section class="panel summary">
         <div class="panel-head">
-          <h2 class="lane-title">Summary</h2>
+          <div class="panel-title">
+            <h2 class="lane-title">Summary</h2>
+            <MatchIdCopy :match-id="match.matchId" />
+          </div>
           <MatchLinks :match-id="match.matchId" />
         </div>
         <div class="summary-top">
@@ -872,14 +1040,15 @@ async function loadByMatchId(mid) {
 
         <div class="summary-body">
           <div v-if="teamSeries.length" class="summary-chart">
-            <!-- Toggles rather than tabs: pick several to overlay them. -->
+            <!-- Toggles rather than tabs: pick several to overlay them. A divider separates hero-by-hero
+                 measures from team ones, which can't be shown together. -->
             <div class="chips" role="group" aria-label="Team chart measures">
               <button
-                v-for="tm in teamAvailable"
+                v-for="(tm, i) in teamAvailable"
                 :key="tm.key"
                 type="button"
                 :aria-pressed="teamSeries.some(s => s.key === tm.key)"
-                :class="{ active: teamSeries.some(s => s.key === tm.key) }"
+                :class="{ active: teamSeries.some(s => s.key === tm.key), 'chip-divide': i > 0 && !!tm.split !== !!teamAvailable[i - 1].split }"
                 @click="toggleTeamMetric(tm.key)"
               >{{ tm.tab }}</button>
             </div>
@@ -935,7 +1104,6 @@ async function loadByMatchId(mid) {
           <AdvantageChart
             :series="laneSeries(group)"
             :extras="laneExtras(group)"
-            :heroes="laneHeroes(group)"
             title="Lane Advantage"
             :height="170"
           />
@@ -964,8 +1132,14 @@ async function loadByMatchId(mid) {
                 </div>
 
                 <div class="player-header">
-                  <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" @error="imageLoadOnError"/>
-                  <div v-else class="avatar avatar-empty"/>
+                  <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" @error="onAvatarError(playerAvatar(p))" />
+                  <!-- No avatar, or it failed to load: a generic user icon. -->
+                  <div v-else class="avatar avatar-empty" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" class="avatar-icon">
+                      <circle cx="12" cy="8.5" r="4" fill="currentColor" />
+                      <path d="M4 20.5c0-4.1 3.6-7 8-7s8 2.9 8 7" fill="currentColor" />
+                    </svg>
+                  </div>
                   <div class="player-info">
                     <div class="name-row">
                       <span class="name-main">
@@ -1184,6 +1358,24 @@ async function loadByMatchId(mid) {
   outline: none;
 }
 .match-input:focus { border-color: var(--color-accent, #34bfff); }
+/* Holds an input and its clear button, which sits inside the input's right edge. */
+.input-wrap { position: relative; display: inline-flex; max-width: 100%; }
+.input-wrap .match-input { padding-right: 2.2rem; }
+.clear-btn {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  transform: translateY(-50%);
+  display: inline-flex;
+  padding: 0.25rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-muted, #7a8799);
+  cursor: pointer;
+}
+.clear-btn:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.06); }
+.clear-btn:focus-visible { outline: 2px solid #34bfff; outline-offset: 1px; }
 .load-btn {
   background: var(--color-accent, #34bfff);
   border: none;
@@ -1205,6 +1397,18 @@ async function loadByMatchId(mid) {
   .spin-icon.spinning { animation: none; opacity: 0.6; }
 }
 .load-btn:hover:not(:disabled) { opacity: 0.85; }
+
+/* Compact header copy of the search. */
+.header-search { display: flex; align-items: center; gap: 0.5rem; width: 100%; max-width: 380px; }
+.header-input-wrap { flex: 1; min-width: 0; }
+.header-search-input { flex: 1; min-width: 0; width: auto; font-size: 0.85rem; padding: 0.4rem 0.75rem; }
+.input-wrap .header-search-input { padding-right: 2rem; }
+.header-search-btn { flex-shrink: 0; font-size: 0.8rem; padding: 0.42rem 0.9rem; white-space: nowrap; }
+.header-search-enter-active, .header-search-leave-active { transition: opacity 0.15s, transform 0.15s; }
+.header-search-enter-from, .header-search-leave-to { opacity: 0; transform: translateY(-4px); }
+@media (prefers-reduced-motion: reduce) {
+  .header-search-enter-active, .header-search-leave-active { transition: none; }
+}
 .error-msg {
   color: #ff6b6b;
   margin-top: 0.75rem;
@@ -1268,6 +1472,7 @@ async function loadByMatchId(mid) {
 /* Unparsed matchup: the parsed summary header and lineups, without the chart below. */
 /* Title on the left, the match links level with it on the right (Matchup and Summary panels). */
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.85rem; }
+.panel-title { display: flex; align-items: baseline; gap: 0.6rem; min-width: 0; }
 .roster-lineups { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
 
 /* Match layout: a sticky sidebar of navigation beside the scrolling sections. */
@@ -1403,17 +1608,13 @@ async function loadByMatchId(mid) {
 }
 .radiant-label { background: rgba(75,180,95,.15); color: #4bb45f; border: 1px solid rgba(75,180,95,.3); }
 .dire-label    { background: rgba(200,60,60,.15);  color: #c83c3c; border: 1px solid rgba(200,60,60,.3); }
-/* Same gold box as the winning kill count in the sidebar. */
+/* Plain gold text beside the winning side's badge. */
 .team-result {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #e8c547;
-  padding: 0.15rem 0.5rem;
-  background: rgba(232,197,71,.12);
-  border: 1px solid rgba(232,197,71,.35);
-  border-radius: 4px;
 }
 .score {
   font-size: 1.6rem;
@@ -1441,12 +1642,38 @@ async function loadByMatchId(mid) {
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
+/* Starts a new group of chips, after a thin divider. */
+.chips button.chip-divide { position: relative; margin-left: 0.6rem; }
+.chips button.chip-divide::before {
+  content: '';
+  position: absolute;
+  /* Midway across the 0.35rem gap plus the 0.6rem margin. */
+  left: calc(-0.475rem - 0.5px);
+  top: 15%;
+  bottom: 15%;
+  width: 1px;
+  background: var(--color-border, #2e3542);
+}
 .chips button.active { background: rgba(52,191,255,.15); border-color: rgba(52,191,255,.3); color: #34bfff; }
 .chips button:hover:not(.active) { color: var(--color-text); border-color: var(--color-muted, #7a8799); }
 /* The page-level time range picker: centred and a touch larger than the graph chips. */
 /* The time range picker: full-width in the sidebar, a touch larger than the graph chips. */
 .view-toggle { margin: 0; flex-wrap: nowrap; }
 .view-toggle button { flex: 1; font-size: 0.74rem; padding: 0.4rem 0.6rem; white-space: nowrap; }
+/* The key that selects this view. */
+.hotkey {
+  display: inline-block;
+  margin-left: 0.4rem;
+  min-width: 1.1em;
+  padding: 0 0.25rem;
+  font: inherit;
+  font-size: 0.62rem;
+  line-height: 1.35;
+  text-align: center;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.6;
+}
 
 .summary-body {
   display: grid;
@@ -1602,6 +1829,9 @@ async function loadByMatchId(mid) {
   flex-shrink: 0;
   background: var(--color-border, #2e3542);
 }
+
+.avatar-empty { display: flex; align-items: center; justify-content: center; overflow: hidden; color: #5c6678; }
+.avatar-icon { width: 62%; height: 62%; margin-top: 12%; }
 
 .player-info {
   flex: 1;

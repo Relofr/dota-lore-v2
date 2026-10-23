@@ -80,7 +80,8 @@ export function statsAt(thisMatch, minute = LANE_MINUTE) {
   return {
     kills: eventsBy(s.killEvents),
     deaths: eventsBy(s.deathEvents),
-    assists: eventsBy(s.assistEvents),
+    // Null when the source has no timeline for it (OpenDota: assists, tower damage), so it isn't shown as 0.
+    assists: s.assistEvents ? eventsBy(s.assistEvents) : null,
     lastHits: sumFirst(s.lastHitsPerMinute, minute),
     denies: sumFirst(s.deniesPerMinute, minute),
     gpm: Math.round(sumFirst(s.goldPerMinute, minute) / minute),
@@ -88,7 +89,7 @@ export function statsAt(thisMatch, minute = LANE_MINUTE) {
     xp: sumFirst(s.experiencePerMinute, minute),
     networth: s.networthPerMinute[Math.min(minute, s.networthPerMinute.length - 1)],
     heroDamage: sumFirst(s.heroDamagePerMinute, minute),
-    towerDamage: sumFirst(s.towerDamagePerMinute, minute),
+    towerDamage: s.towerDamagePerMinute ? sumFirst(s.towerDamagePerMinute, minute) : null,
     // Picked up or bottled; either way the rune went to this player.
     runes: eventsBy(s.runes),
     level: (s.level ?? []).filter(t => t <= cutoff).length,
@@ -284,7 +285,9 @@ export function laneBreakdown(group, allPlayers, outcome, minute = LANE_MINUTE) 
     compareRow('deaths', 'Deaths', deathsR.total, deathsD.total, { lowerIsBetter: true, format: String }),
     compareRow('goldFed', 'Gold given away', deathsR.goldFed, deathsD.goldFed, { lowerIsBetter: true }),
     compareRow('runes', 'Runes taken', total(group.radiant, 'runes'), total(group.dire, 'runes'), { format: String }),
-    compareRow('towerDamage', 'Tower damage', total(group.radiant, 'towerDamage'), total(group.dire, 'towerDamage')),
+    ...all.every(p => at.get(p)?.towerDamage != null)
+      ? [compareRow('towerDamage', 'Tower damage', total(group.radiant, 'towerDamage'), total(group.dire, 'towerDamage'))]
+      : [],
   ]
 
   const rotations = [

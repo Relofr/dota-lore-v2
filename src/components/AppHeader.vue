@@ -12,6 +12,9 @@ const route = useRoute()
         <span class="logo-sub">LORE</span>
       </RouterLink>
 
+      <!-- Pages can teleport controls here, e.g. Scout's search once its own has scrolled away. -->
+      <div id="header-slot" class="header-slot" />
+
       <nav class="main-nav">
         <RouterLink to="/" :class="{ active: route.path === '/' }">Home</RouterLink>
         <RouterLink to="/heroes" :class="{ active: route.path.startsWith('/heroes') }">Heroes</RouterLink>
@@ -38,6 +41,14 @@ const route = useRoute()
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.header-slot {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 var(--spacing-lg);
 }
 
 .site-logo {

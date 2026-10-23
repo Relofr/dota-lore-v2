@@ -1,4 +1,5 @@
 import { getStored, putStored } from './matchStore.js'
+import { fetchOpenDotaItems } from './openDotaApi.js'
 
 const ENDPOINT = 'https://api.stratz.com/graphql'
 
@@ -181,6 +182,11 @@ export function fetchItems() {
       }
       return new Map(items.map(i => [i.id, i]))
     })
+    // OpenDota's list as a backup; not saved, so Stratz's fuller one is tried again next time.
+    .catch(async err => {
+      console.warn('[Stratz] items, using OpenDota:', err.message)
+      return new Map((await fetchOpenDotaItems()).map(i => [i.id, i]))
+    })
     .catch(err => {
       itemsPromise = null
       throw err
@@ -222,6 +228,19 @@ async function loadMatchPlayback(matchId) {
     }
   }`)
   return data.match?.players ?? []
+}
+
+// Each player's assist times, { [playerSlot]: [{ time }] }. OpenDota doesn't record when assists happen,
+// so a match loaded from it borrows them from Stratz; null when Stratz hasn't parsed the match.
+export async function fetchAssistEvents(matchId) {
+  const data = await stratzQuery(`{
+    match(id: ${matchId}) {
+      players { playerSlot stats { assistEvents { time } } }
+    }
+  }`)
+  const players = data.match?.players ?? []
+  if (!players.length || players.some(p => !p.stats?.assistEvents)) return null
+  return Object.fromEntries(players.map(p => [p.playerSlot, p.stats.assistEvents]))
 }
 
 const AEGIS = 117

@@ -1,11 +1,15 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, useId } from 'vue'
-import { compact, formatTime } from '@/utils/matchAnalysis.js'
+import { compact, formatTime, heroImage } from '@/utils/matchAnalysis.js'
 import HeroIcon from './HeroIcon.vue'
 
 const props = defineProps({
-  // [{ key, label, kind: 'lead' | 'probability', values, step, color }]. Leads are Radiant minus Dire;
-  // probabilities are Radiant's win probability, 0–1. Each series keeps its own step (seconds between points).
+  // [{ key, label, short, kind: 'lead' | 'probability' | 'perHero', values, step, color }]. Leads are Radiant
+  // minus Dire; probabilities are Radiant's win probability, 0–1. A perHero series has `heroes: [{ key, hero,
+  // isRadiant, values, dots }]` instead of values: one line per hero, labelled with the hero's icon; `dots`
+  // (seconds, e.g. level-ups) are marked on the line. Leads and probabilities share a chart split at zero
+  // (Radiant above, Dire below); perHero series get a plain chart from zero up. Don't mix the two.
+  // `short` names a perHero series' column in the tooltip. Each series keeps its own step (seconds per point).
   series: { type: Array, required: true },
   height: { type: Number, default: 150 },
   // Grow to fill the parent's height (never below `height`), e.g. to match a neighbouring panel.
@@ -14,9 +18,6 @@ const props = defineProps({
   title: { type: String, default: 'Advantage' },
   // [{ label, values, step }]: leads listed in the tooltip without a line of their own.
   extras: { type: Array, default: () => [] },
-  // [{ key, hero, isRadiant, values: { [seriesKey]: number[] } }]: each hero's own totals, listed in
-  // the tooltip under the leads, one column per shown series. Indexed like the series of that key.
-  heroes: { type: Array, default: () => [] },
   // [{ key, time, type: 'roshan' | 'wisdom', side: 'radiant' | 'dire', hero }]: marked along the edge
   // of the side that took them (Radiant top, Dire bottom) and listed in the tooltip near their time.
   events: { type: Array, default: () => [] },
@@ -33,6 +34,8 @@ const EVENT_TYPES = {
 const RADIANT = '#45a957'
 const DIRE = '#c83c3c'
 const PAD = { l: 44, r: 12, t: 10, b: 22 }
+// Room on the right for the hero icons that label per-hero lines.
+const END_ICON = 16
 
 const uid = useId()
 const root = ref(null)
@@ -58,9 +61,65 @@ onBeforeUnmount(() => {
 })
 
 const h = computed(() => (props.fill ? Math.max(props.height, Math.floor(bodyHeight.value)) : props.height))
-const plotW = computed(() => width.value - PAD.l - PAD.r)
+// Heroes switched off with the toggles under a per-hero chart, by hero key.
+const hiddenHeroes = ref(new Set())
+
+// Every hero on the per-hero lines, Radiant first, for the toggles.
+const toggleHeroes = computed(() => {
+  const byKey = new Map()
+  for (const s of props.series) {
+    if (s.kind !== 'perHero') continue
+    for (const hr of s.heroes) if (!byKey.has(hr.key)) byKey.set(hr.key, { key: hr.key, hero: hr.hero, isRadiant: hr.isRadiant })
+  }
+  return [...byKey.values()].sort((a, b) => Number(b.isRadiant) - Number(a.isRadiant))
+})
+
+// Hides or shows a hero's lines, keeping at least one hero on.
+function toggleHero(key) {
+  const next = new Set(hiddenHeroes.value)
+  if (next.has(key)) next.delete(key)
+  else if (toggleHeroes.value.some(t => t.key !== key && !next.has(t.key))) next.add(key)
+  hiddenHeroes.value = next
+}
+
+// Stratz's faction artwork, for the whole-side toggles.
+const SIDE_ICONS = {
+  radiant: 'https://cdn.stratz.com/images/dota2/radiant_square.png',
+  dire: 'https://cdn.stratz.com/images/dota2/dire_square.png',
+}
+
+// The heroes grouped by side, each group led by a toggle for the whole side.
+const toggleSides = computed(() => [true, false]
+  .map(isRadiant => ({
+    key: isRadiant ? 'radiant' : 'dire',
+    label: isRadiant ? 'Radiant' : 'Dire',
+    icon: SIDE_ICONS[isRadiant ? 'radiant' : 'dire'],
+    heroes: toggleHeroes.value.filter(t => t.isRadiant === isRadiant),
+  }))
+  .filter(side => side.heroes.length))
+
+const sideShown = side => side.heroes.some(t => !hiddenHeroes.value.has(t.key))
+
+// Shows a side's heroes if all are hidden, otherwise hides them all, unless that would leave nothing shown.
+function toggleSide(side) {
+  const next = new Set(hiddenHeroes.value)
+  if (!sideShown(side)) side.heroes.forEach(t => next.delete(t.key))
+  else if (toggleHeroes.value.some(t => t.isRadiant !== side.heroes[0].isRadiant && !next.has(t.key))) side.heroes.forEach(t => next.add(t.key))
+  hiddenHeroes.value = next
+}
+
+// The series with hidden heroes left out, so lines, scaling and the tooltip all follow the toggles.
+const shown = computed(() => props.series.map(s => (s.kind === 'perHero'
+  ? { ...s, heroes: s.heroes.filter(hr => !hiddenHeroes.value.has(hr.key)) }
+  : s)))
+
+const hasPerHero = computed(() => props.series.some(s => s.kind === 'perHero'))
+const padR = computed(() => (hasPerHero.value ? END_ICON + 8 : PAD.r))
+const plotW = computed(() => width.value - PAD.l - padR.value)
 const plotH = computed(() => h.value - PAD.t - PAD.b)
 const single = computed(() => props.series.length === 1)
+// Plain line chart (values from zero up) rather than one split into Radiant and Dire halves.
+const normal = computed(() => props.series.length > 0 && props.series.every(s => s.kind === 'perHero'))
 
 function niceStep(range, count) {
   const raw = range / count
@@ -72,28 +131,93 @@ function niceStep(range, count) {
 // Everything is drawn on one -1..1 scale with Radiant above the zero line. A lone lead is scaled to a
 // round number so its axis can show real values; overlaid leads are each scaled to their own peak, so
 // lines of different units share the chart without a second axis. Win probability maps 50% to the line.
-const scaled = computed(() => props.series.map(s => {
+// A series' raw values, all heroes' together for a perHero one (for scaling and length).
+const allValues = s => (s.kind === 'perHero' ? s.heroes.flatMap(hr => hr.values) : s.values)
+const pointCount = s => (s.kind === 'perHero' ? Math.max(0, ...s.heroes.map(hr => hr.values.length)) : s.values.length)
+
+const scaled = computed(() => shown.value.map(s => {
   if (s.kind === 'probability') return { ...s, norm: v => (v - 0.5) * 2 }
-  const peak = Math.max(200, ...s.values.map(Math.abs))
+  const peak = Math.max(200, ...allValues(s).map(Math.abs))
   const unit = niceStep(peak, 3)
   const scale = single.value ? Math.ceil(peak / unit) * unit : peak
   return { ...s, unit, scale, norm: v => v / scale }
 }))
 
-const duration = computed(() => Math.max(60, ...props.series.map(s => (s.values.length - 1) * s.step)))
+const duration = computed(() => Math.max(60, ...shown.value.map(s => (pointCount(s) - 1) * s.step)))
 const finest = computed(() => Math.min(...props.series.map(s => s.step)))
 
 const x = t => PAD.l + (t / duration.value) * plotW.value
-const y = n => PAD.t + ((1 - n) / 2) * plotH.value
+// Split: n runs -1 (Dire) to 1 (Radiant) with zero mid-height. Normal: 0 at the bottom to 1 at the top.
+const y = n => PAD.t + (normal.value ? 1 - n : (1 - n) / 2) * plotH.value
 const zeroY = computed(() => y(0))
 
-function path(s) {
-  return s.values.map((v, i) => `${i ? 'L' : 'M'}${x(i * s.step).toFixed(1)},${y(s.norm(v)).toFixed(1)}`).join('')
+function path(s, values, sign = 1) {
+  return values.map((v, i) => `${i ? 'L' : 'M'}${x(i * s.step).toFixed(1)},${y(s.norm(sign * v)).toFixed(1)}`).join('')
 }
-const lines = computed(() => scaled.value.map(s => ({ ...s, d: path(s) })))
+const lines = computed(() => scaled.value.map(s => ({ ...s, d: s.kind === 'perHero' ? '' : path(s, s.values) })))
+
+const perHeroSeries = computed(() => scaled.value.filter(s => s.kind === 'perHero'))
+
+// One line per hero for perHero series: Radiant's up (sign 1), Dire's down (sign -1). In a lane, a side's
+// second hero is dashed so the two stay apart where they cross; with a whole team the icons tell them apart.
+const heroTracks = computed(() => perHeroSeries.value.flatMap(s => {
+  const seen = { radiant: 0, dire: 0 }
+  const perSide = { radiant: s.heroes.filter(hr => hr.isRadiant).length, dire: s.heroes.filter(hr => !hr.isRadiant).length }
+  return s.heroes.map(hr => {
+    const side = hr.isRadiant ? 'radiant' : 'dire'
+    const sign = normal.value || hr.isRadiant ? 1 : -1
+    const last = hr.values.length - 1
+    const at = t => valueAt({ values: hr.values, step: s.step }, t)
+    return {
+      key: `${s.key}:${hr.key}`,
+      heroKey: hr.key,
+      s,
+      hero: hr.hero,
+      isRadiant: hr.isRadiant,
+      values: hr.values,
+      side,
+      sign,
+      dashed: perSide[side] === 2 && seen[side]++ > 0,
+      color: single.value ? (hr.isRadiant ? RADIANT : DIRE) : s.color,
+      d: path(s, hr.values, sign),
+      endX: x(last * s.step),
+      endY: y(s.norm(sign * (hr.values[last] ?? 0))),
+      // Marks along the line (level-ups for experience) within the visible range.
+      dots: (hr.dots ?? [])
+        .filter(t => t > 0 && at(t) != null)
+        .map(t => ({ t, cx: x(t), cy: y(s.norm(sign * at(t))) })),
+    }
+  })
+}))
+
+// Hero icons where each per-hero line ends, nudged apart so close finishes don't overlap, and kept inside
+// the plot. With several measures for a whole team that would be dozens, so only the first is labelled.
+const endIcons = computed(() => {
+  const tracks = heroTracks.value.length > 12 ? heroTracks.value.filter(t => t.s.key === perHeroSeries.value[0].key) : heroTracks.value
+  const icons = tracks
+    .map(t => ({ key: t.key, hero: t.hero, src: heroImage(t.hero), x: t.endX + 4, y: t.endY - END_ICON / 2 }))
+    .filter(i => i.src)
+    .sort((a, b) => a.y - b.y)
+  for (let i = 1; i < icons.length; i++) icons[i].y = Math.max(icons[i].y, icons[i - 1].y + END_ICON + 1)
+  // Pushed past the bottom: walk back up from the floor.
+  const floor = h.value - PAD.b - END_ICON
+  for (let i = icons.length - 1; i >= 0; i--) {
+    const limit = i === icons.length - 1 ? floor : icons[i + 1].y - END_ICON - 1
+    icons[i].y = Math.max(PAD.t - 4, Math.min(icons[i].y, limit))
+  }
+  return icons
+})
 
 // Grid lines in scaled units, labelled in real ones when a single series makes that possible.
 const yTicks = computed(() => {
+  if (normal.value) {
+    // Several measures are each scaled to their own peak, so only a lone one gets real values.
+    if (!single.value) return [1, 0.75, 0.5, 0.25, 0].map(n => ({ n, label: '' }))
+    const s = scaled.value[0]
+    const ticks = []
+    for (let v = 0; v <= s.scale + 1e-9; v += s.unit) ticks.push({ n: v / s.scale, label: compact(v) })
+    return ticks
+  }
   if (!single.value) {
     return [
       { n: 1, label: 'Radiant' },
@@ -182,8 +306,33 @@ const hoverEvents = computed(() => (hover.value == null ? [] : markers.value.fil
 const hoverRows = computed(() => {
   if (hover.value == null) return []
   return scaled.value
+    .filter(s => s.kind !== 'perHero')
     .map(s => ({ s, v: valueAt(s, hover.value) }))
     .filter(r => r.v != null)
+})
+
+// Each hero's value on the per-hero lines at the hovered time, for the dots.
+const hoverTracks = computed(() => {
+  if (hover.value == null) return []
+  return heroTracks.value
+    .map(t => ({ t, v: valueAt({ values: t.values, step: t.s.step }, hover.value) }))
+    .filter(r => r.v != null)
+})
+
+// The tooltip's per-hero table: a section per side, one row per hero and one column per perHero series,
+// with the side's combined value for each column in brackets beside its name.
+const heroSections = computed(() => {
+  if (hover.value == null || !perHeroSeries.value.length) return []
+  return [true, false].map(isRadiant => {
+    const heroes = new Map()
+    for (const t of heroTracks.value.filter(t => t.isRadiant === isRadiant)) {
+      if (!heroes.has(t.heroKey)) heroes.set(t.heroKey, { key: t.heroKey, hero: t.hero, cells: {} })
+      heroes.get(t.heroKey).cells[t.s.key] = valueAt({ values: t.values, step: t.s.step }, hover.value)
+    }
+    const rows = [...heroes.values()]
+    const totals = perHeroSeries.value.map(s => rows.reduce((sum, r) => sum + (r.cells[s.key] ?? 0), 0))
+    return { key: isRadiant ? 'radiant' : 'dire', label: isRadiant ? 'Radiant' : 'Dire', rows, totals }
+  }).filter(sec => sec.rows.length)
 })
 
 const extraRows = computed(() => {
@@ -193,29 +342,19 @@ const extraRows = computed(() => {
     .filter(r => r.v != null)
 })
 
-// The series that have per-hero values, in legend order: the tooltip's hero columns.
-const heroColumns = computed(() => scaled.value.filter(s => props.heroes.some(hr => hr.values[s.key])))
-
-const heroSides = computed(() => [
-  { key: 'radiant', label: 'Radiant', list: props.heroes.filter(hr => hr.isRadiant) },
-  { key: 'dire', label: 'Dire', list: props.heroes.filter(hr => !hr.isRadiant) },
-].filter(side => side.list.length && heroColumns.value.length))
-
-function heroValue(hr, s) {
-  const v = hr.values[s.key] ? valueAt({ values: hr.values[s.key], step: s.step }, hover.value) : null
-  return v == null ? '—' : compact(v)
-}
-
 const tooltipStyle = computed(() => {
   if (hover.value == null) return {}
   const px = x(hover.value)
-  return px > width.value - (props.heroes.length ? 280 : 210) ? { right: `${width.value - px + 10}px` } : { left: `${px + 10}px` }
+  return px > width.value - (perHeroSeries.value.length ? 60 + perHeroSeries.value.length * 60 : 210) ? { right: `${width.value - px + 10}px` } : { left: `${px + 10}px` }
 })
 
 const heading = computed(() => (single.value ? props.series[0].label : props.title))
 
 const summary = computed(() => props.series
   .map(s => {
+    if (s.kind === 'perHero') {
+      return `${s.label}: ${s.heroes.map(hr => `${hr.hero?.displayName ?? 'Hero'} ${compact(hr.values.at(-1) ?? 0)}`).join(', ')}`
+    }
     const end = s.values.at(-1) ?? 0
     return `${s.label}: ${display(s, end)} ${sideShort(s, end)} at ${formatTime((s.values.length - 1) * s.step)}`
   })
@@ -262,11 +401,13 @@ const summary = computed(() => props.series
         </defs>
 
         <!-- Radiant's half tinted green and Dire's red, so which side a line favours reads at a glance. -->
-        <rect class="zone" :x="PAD.l" :y="PAD.t" :width="plotW" :height="zeroY - PAD.t" :fill="RADIANT" />
-        <rect class="zone" :x="PAD.l" :y="zeroY" :width="plotW" :height="h - PAD.b - zeroY" :fill="DIRE" />
+        <template v-if="!normal">
+          <rect class="zone" :x="PAD.l" :y="PAD.t" :width="plotW" :height="zeroY - PAD.t" :fill="RADIANT" />
+          <rect class="zone" :x="PAD.l" :y="zeroY" :width="plotW" :height="h - PAD.b - zeroY" :fill="DIRE" />
+        </template>
 
         <g class="grid">
-          <line v-for="t in yTicks" :key="t.n" :x1="PAD.l" :x2="width - PAD.r" :y1="y(t.n)" :y2="y(t.n)" :class="{ zero: t.n === 0 }" />
+          <line v-for="t in yTicks" :key="t.n" :x1="PAD.l" :x2="width - padR" :y1="y(t.n)" :y2="y(t.n)" :class="{ zero: t.n === 0 }" />
         </g>
         <g class="y-ticks">
           <text v-for="t in yTicks" :key="t.n" :x="PAD.l - 6" :y="y(t.n)" dy="0.32em" text-anchor="end">{{ t.label }}</text>
@@ -275,8 +416,8 @@ const summary = computed(() => props.series
           <text v-for="t in xTicks" :key="t.t" :x="x(t.t)" :y="h - 6" text-anchor="middle">{{ t.label }}</text>
         </g>
 
-        <!-- One series: green above the line and red below. -->
-        <template v-if="single">
+        <!-- One lead or probability series: green above the line and red below. -->
+        <template v-if="single && lines[0].kind !== 'perHero'">
           <path
             :d="`${lines[0].d}L${x((lines[0].values.length - 1) * lines[0].step).toFixed(1)},${zeroY.toFixed(1)}L${x(0).toFixed(1)},${zeroY.toFixed(1)}Z`"
             :fill="RADIANT" fill-opacity="0.12" :clip-path="`url(#${uid}-above)`"
@@ -291,7 +432,7 @@ const summary = computed(() => props.series
         <!-- Several: one colour per measure, win probability dashed since it isn't a lead. -->
         <template v-else>
           <path
-            v-for="l in lines"
+            v-for="l in lines.filter(l => l.kind !== 'perHero')"
             :key="l.key"
             :d="l.d"
             class="line"
@@ -299,6 +440,34 @@ const summary = computed(() => props.series
             :stroke-dasharray="l.kind === 'probability' ? '5 4' : null"
           />
         </template>
+        <!-- Per-hero lines, labelled by the hero's icon where each ends. -->
+        <path
+          v-for="t in heroTracks"
+          :key="t.key"
+          :d="t.d"
+          class="line"
+          :stroke="t.color"
+          :stroke-dasharray="t.dashed ? '6 3' : null"
+        />
+        <circle
+          v-for="dot in heroTracks.flatMap(t => t.dots.map(d => ({ ...d, key: `${t.key}:${d.t}`, color: t.color })))"
+          :key="dot.key"
+          :cx="dot.cx"
+          :cy="dot.cy"
+          r="2.4"
+          :fill="dot.color"
+          class="line-dot"
+        />
+        <image
+          v-for="i in endIcons"
+          :key="`icon-${i.key}`"
+          :href="i.src"
+          :x="i.x"
+          :y="i.y"
+          :width="END_ICON"
+          :height="END_ICON"
+          class="end-icon"
+        ><title>{{ i.hero?.displayName }}</title></image>
 
         <!-- Objectives: an icon on the taking side's edge (Radiant top, Dire bottom), with a faint tick down to the zero line. -->
         <g class="markers">
@@ -320,10 +489,19 @@ const summary = computed(() => props.series
             :fill="single ? sideColor(r.s, r.v) : r.s.color"
             class="hover-dot"
           />
+          <circle
+            v-for="r in hoverTracks"
+            :key="r.t.key"
+            :cx="x(hover)"
+            :cy="y(r.t.s.norm(r.t.sign * r.v))"
+            r="4"
+            :fill="r.t.color"
+            class="hover-dot"
+          />
         </g>
       </svg>
 
-      <div v-if="hover != null && hoverRows.length" class="tooltip" :style="tooltipStyle">
+      <div v-if="hover != null && (hoverRows.length || heroSections.length)" class="tooltip" :style="tooltipStyle">
         <div class="tt-time">{{ formatTime(hover) }}</div>
         <div v-for="m in hoverEvents" :key="m.key" class="tt-event">
           <img :src="m.icon" class="key-icon" alt="" />
@@ -340,21 +518,59 @@ const summary = computed(() => props.series
           <strong>{{ compact(Math.abs(r.v)) }}</strong>
           <span>{{ r.ex.label }} · {{ r.v > 0 ? 'Radiant' : r.v < 0 ? 'Dire' : 'even' }}</span>
         </div>
-        <div v-for="side in heroSides" :key="side.key" class="tt-heroes" :style="{ '--cols': heroColumns.length }">
-          <div class="tt-side">{{ side.label }}</div>
-          <!-- With several series, a key above the columns says which value is which. -->
-          <div v-if="!single" class="tt-hero tt-hero-key">
-            <span />
-            <i v-for="s in heroColumns" :key="s.key" :class="{ dashed: s.kind === 'probability' }" :style="{ color: s.color }" />
+        <div v-for="sec in heroSections" :key="sec.key" class="tt-heroes" :style="{ '--cols': perHeroSeries.length }">
+          <div class="tt-side">
+            {{ sec.label }}
+            <span class="tt-side-total">({{ sec.totals.map(compact).join(' · ') }})</span>
           </div>
-          <div v-for="hr in side.list" :key="hr.key" class="tt-hero">
-            <HeroIcon :hero="hr.hero" class="tt-hero-icon" />
-            <strong v-for="s in heroColumns" :key="s.key">{{ heroValue(hr, s) }}</strong>
+          <!-- Column names, with each measure's line colour when several are shown. -->
+          <div class="tt-hero tt-hero-key">
+            <span />
+            <span v-for="s in perHeroSeries" :key="s.key" class="tt-col">
+              <i v-if="!single" :style="{ color: s.color }" />{{ s.short ?? s.label }}
+            </span>
+          </div>
+          <div v-for="r in sec.rows" :key="r.key" class="tt-hero">
+            <HeroIcon :hero="r.hero" class="tt-hero-icon" />
+            <strong v-for="s in perHeroSeries" :key="s.key">{{ r.cells[s.key] == null ? '—' : compact(r.cells[s.key]) }}</strong>
           </div>
         </div>
       </div>
     </div>
     <div class="x-label">Minute</div>
+
+    <!-- Per-hero charts: per side, a toggle for the whole side and one for each hero, to show or hide lines.
+         The side emblems sit on the outside (Radiant left, Dire right) with a dot between the teams. -->
+    <div v-if="toggleHeroes.length" class="hero-toggles" role="group" aria-label="Heroes shown">
+      <template v-for="(side, si) in toggleSides" :key="side.key">
+      <span v-if="si > 0" class="team-dot" aria-hidden="true" />
+      <div class="toggle-side" :class="`side-${side.key}`">
+        <button
+          type="button"
+          class="hero-toggle side-toggle"
+          :class="[`toggle-${side.key}`, { off: !sideShown(side) }]"
+          :aria-pressed="sideShown(side)"
+          :title="`${sideShown(side) ? 'Hide' : 'Show'} all of ${side.label}`"
+          @click="toggleSide(side)"
+        >
+          <img :src="side.icon" :alt="side.label" class="hero-toggle-icon" />
+        </button>
+        <span class="toggle-sep" aria-hidden="true" />
+        <button
+          v-for="t in side.heroes"
+          :key="t.key"
+          type="button"
+          class="hero-toggle"
+          :class="[t.isRadiant ? 'toggle-radiant' : 'toggle-dire', { off: hiddenHeroes.has(t.key) }]"
+          :aria-pressed="!hiddenHeroes.has(t.key)"
+          :title="`${hiddenHeroes.has(t.key) ? 'Show' : 'Hide'} ${t.hero?.displayName ?? 'hero'}`"
+          @click="toggleHero(t.key)"
+        >
+          <HeroIcon :hero="t.hero" class="hero-toggle-icon" />
+        </button>
+      </div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -412,6 +628,7 @@ const summary = computed(() => props.series
 .zone { fill-opacity: 0.07; }
 .marker-tick { stroke: #7a8799; stroke-opacity: 0.35; stroke-width: 1; stroke-dasharray: 2 3; }
 .marker-icon { cursor: default; }
+.end-icon { clip-path: inset(0 round 3px); }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .grid line { stroke: #2a3140; stroke-width: 1; shape-rendering: crispEdges; }
 .grid line.zero { stroke: #4a5366; }
@@ -430,6 +647,32 @@ const summary = computed(() => props.series
   letter-spacing: 0.05em;
   color: var(--color-muted, #7a8799);
 }
+
+/* Hero toggles: underlined in their team's colour; a switched-off hero is greyed out. */
+.hero-toggles { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.3rem 1.1rem; margin-top: 0.45rem; }
+.toggle-side { display: flex; align-items: center; gap: 0.3rem; }
+/* Dire mirrors Radiant: heroes first, then the divider and the emblem on the outside. */
+.side-dire .toggle-sep { order: 1; }
+.side-dire .side-toggle { order: 2; }
+.team-dot { align-self: center; width: 4px; height: 4px; border-radius: 50%; background: var(--color-muted, #7a8799); }
+/* Divides a side's toggle from its heroes. */
+.toggle-sep { width: 1px; height: 20px; background: var(--color-border, #2e3542); margin: 0 0.1rem; }
+.hero-toggle {
+  display: inline-flex;
+  padding: 2px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  transition: opacity 0.15s, filter 0.15s;
+}
+.toggle-radiant { border-bottom-color: #45a957; }
+.toggle-dire { border-bottom-color: #c83c3c; }
+.hero-toggle.off { opacity: 0.35; filter: grayscale(1); border-bottom-color: var(--color-border, #2e3542); }
+.hero-toggle:hover { opacity: 1; }
+.hero-toggle:focus-visible { outline: 2px solid #34bfff; outline-offset: 1px; }
+.hero-toggle :deep(img), .hero-toggle-icon { display: block; width: 26px; height: 26px; border-radius: 3px; object-fit: cover; }
 
 .tooltip {
   position: absolute;
@@ -456,6 +699,11 @@ const summary = computed(() => props.series
   white-space: nowrap;
 }
 .tt-row strong { color: var(--color-text); font-weight: 700; min-width: 3.2rem; }
+/* Level-up (or other) marks on a line, ringed in the surface colour so they read over other lines. */
+.line-dot { stroke: var(--color-surface, #1a1f2b); stroke-width: 1; pointer-events: none; }
+.tt-side-total { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--color-text); margin-left: 0.25rem; }
+.tt-col { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.25rem; font-size: 0.6rem; color: var(--color-muted, #7a8799); }
+.tt-col i { display: inline-block; width: 10px; border-top: 2px solid currentColor; }
 /* The objective icons again, in the legend and tooltip. */
 .key-icon { display: block; height: 14px; width: auto; }
 .tt-event {
@@ -490,12 +738,6 @@ const summary = computed(() => props.series
   padding: 0.08rem 0;
   white-space: nowrap;
 }
-.tt-hero-key i {
-  justify-self: end;
-  width: 12px;
-  border-top: 2px solid currentColor;
-}
-.tt-hero-key i.dashed { border-top-style: dashed; }
 .tt-hero :deep(img) { width: 20px; height: 20px; border-radius: 3px; object-fit: cover; }
 .tt-hero strong { color: var(--color-text); font-weight: 700; text-align: right; }
 .tt-row span { color: var(--color-muted, #7a8799); }

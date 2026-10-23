@@ -56,10 +56,6 @@ defineProps({
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #e8c547;
-  padding: 0.15rem 0.45rem;
-  background: rgba(232,197,71,.12);
-  border: 1px solid rgba(232,197,71,.35);
-  border-radius: 4px;
 }
 
 .lineup-grid {
