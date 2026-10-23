@@ -69,9 +69,11 @@ function share(row) {
 </template>
 
 <style scoped>
+/* When stretched to fill the sidebar, the content stays at the top and the spare height sits below it. */
 .lane-card {
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   gap: 0.4rem;
   min-width: 0;
   padding: 0.5rem 0.7rem;

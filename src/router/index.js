@@ -10,7 +10,9 @@ const router = createRouter({
     { path: '/', component: HomeView },
     { path: '/heroes', component: HeroesView },
     { path: '/heroes/:id', component: HeroDetailView },
-    { path: '/scout', component: ScoutView },
+    // /scout/<laning|full-game>/<lane>/<matchId>, every part optional (the lane is left out for the summary).
+    // One route for all of them, so moving between matches doesn't remount the page.
+    { path: '/scout/:view(laning|full-game)?/:section(top|mid|bottom|roaming)?/:matchId(\\d+)?', component: ScoutView },
   ],
   scrollBehavior(to, _from, savedPosition) {
     if (to.path.startsWith('/heroes') && savedPosition) {

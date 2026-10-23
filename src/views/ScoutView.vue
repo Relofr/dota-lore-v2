@@ -56,8 +56,8 @@ const match = ref(null)
 const view = ref('laning')
 // The stat row under the pointer, as `lane:pair:label`, so the facing hero's card lights the same row.
 const hoveredStat = ref(null)
-// The summary chart's measures, overlaid when more than one is picked; the team ones to start.
-const teamMetrics = ref(['winProbability', 'networth', 'experience'])
+// The summary chart's measures, overlaid when more than one is picked; hero damage to start, like the lanes.
+const teamMetrics = ref(['heroDamage'])
 // Each lane chart's picked measures by lane key; a lane not in here shows hero damage only.
 const laneMetrics = ref({})
 const itemMap = ref(new Map())
@@ -219,12 +219,43 @@ function watchSections() {
   for (const el of sections) sectionObserver.observe(el)
 }
 
+// The URL is /scout/<view>/<lane>/<matchId>, e.g. /scout/laning/mid/8812345678, so a view and section can
+// be linked to. The summary, at the top, has no lane part.
+const VIEW_SLUGS = { laning: 'laning', full: 'full-game' }
+const SECTION_SLUGS = { 'lane-top': 'top', 'lane-mid': 'mid', 'lane-bottom': 'bottom', 'lane-other': 'roaming' }
+const SLUG_SECTIONS = Object.fromEntries(Object.entries(SECTION_SLUGS).map(([id, slug]) => [slug, id]))
+
+function scoutPath(matchId, viewKey = view.value, sectionId = null) {
+  const lane = SECTION_SLUGS[sectionId]
+  return `/scout/${VIEW_SLUGS[viewKey]}${lane ? `/${lane}` : ''}/${matchId}`
+}
+
+// The section a link pointed at, scrolled to once its match has loaded.
+let pendingSection = null
+// Off while a match is loading and its linked section is being scrolled to, so the URL isn't rewritten first.
+let syncUrl = false
+
+// Keeps the URL on the current view and the section in view. replaceState rather than the router: these
+// changes shouldn't add history entries, and the router's scroll handling would jump the page to the top.
+watch([view, activeSection], ([v, id]) => {
+  if (!syncUrl || !match.value) return
+  const path = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${scoutPath(match.value.matchId, v, id)}`
+  if (path !== location.pathname) history.replaceState(history.state, '', path)
+})
+
 watch(
   () => [match.value?.matchId, match.value?.isParsed, laneGroups.value.length],
   async () => {
+    syncUrl = false
     activeSection.value = 'overview'
     await nextTick()
+    // A link to a section: go straight there (no smooth scroll on arrival).
+    if (pendingSection && match.value?.isParsed) {
+      document.getElementById(pendingSection)?.scrollIntoView({ block: 'start' })
+      pendingSection = null
+    }
     watchSections()
+    syncUrl = true
   },
 )
 onBeforeUnmount(() => sectionObserver?.disconnect())
@@ -257,8 +288,29 @@ function heroSeries(m, leads) {
       values: windowed(h[m.key], leads.step),
       // Level 1 is at the start, so only the level-ups after it.
       dots: m.key === 'experience' ? (h.player.thisMatch.stats?.level ?? []).slice(1) : null,
+      // Net worth shows the hero's last hits/denies beside it.
+      detail: m.key === 'networth' ? t => csText(csAt(h, leads.step, t)) : null,
     })),
   }
+}
+
+// A hero's last hits and denies by second t. Last hits follow the chart's own series (per-second in the
+// laning view); denies only come per minute, so they're counted to the last whole minute.
+function csAt(h, step, t) {
+  const lh = h.lastHits?.[Math.min(Math.round(t / step), (h.lastHits?.length ?? 1) - 1)] ?? 0
+  const perMinute = h.player.thisMatch.stats?.deniesPerMinute ?? []
+  const dn = perMinute.slice(0, Math.floor(t / 60)).reduce((a, b) => a + b, 0)
+  return { lh, dn }
+}
+const csText = ({ lh, dn }) => `${lh}/${dn}`
+
+// Each side's combined last hits/denies, for beside the team net worth lead.
+function teamCsText(leads, t) {
+  const side = isRadiant => leads.heroes
+    .filter(h => h.player.isRadiant === isRadiant)
+    .map(h => csAt(h, leads.step, t))
+    .reduce((a, b) => ({ lh: a.lh + b.lh, dn: a.dn + b.dn }), { lh: 0, dn: 0 })
+  return `CS ${csText(side(true))} vs ${csText(side(false))}`
 }
 
 const teamLeads = computed(() =>
@@ -271,7 +323,8 @@ function teamMetricSeries(tm) {
     return m.winRates?.length ? { ...tm, values: windowed(m.winRates), step: 60 } : null
   }
   if (!tm.split) return teamLeads.value ? heroSeries(tm, teamLeads.value) : null
-  const lead = { ...tm, kind: 'lead' }
+  const leads = teamLeads.value
+  const lead = { ...tm, kind: 'lead', detail: tm.key === 'networth' && leads ? t => teamCsText(leads, t) : null }
   // Per-second in the laning view once playback is in; otherwise Stratz's own per-minute team leads.
   if (fine.value && teamLeads.value) return { ...lead, values: windowed(teamLeads.value[tm.key], teamLeads.value.step), step: teamLeads.value.step }
   const source = tm.key === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
@@ -337,10 +390,6 @@ function toggleLaneMetric(group, key) {
   laneMetrics.value[group.key] = toggled(laneSeries(group).map(s => s.key), key)
 }
 
-// Last hits have no line of their own but are listed under the leads in the tooltip.
-function laneExtras(group) {
-  return [{ label: 'Last hits', values: windowed(group.leads.lastHits, group.leads.step), step: group.leads.step }]
-}
 
 // This player's stats as rows, @10 and end of game side by side, for the vertical table on each card.
 function matchStatRows(p) {
@@ -656,13 +705,15 @@ function clearInput(e) {
   e.currentTarget.parentElement.querySelector('input')?.focus()
 }
 
-// The match ID lives in the URL (?match=…) so results can be shared; searching pushes a new URL and the
-// watcher below does the loading, which also covers opening a shared link and the back button.
+// The match ID lives in the URL (/scout/<view>/<matchId>) so results can be shared; searching pushes a new
+// URL and the watcher below does the loading, which also covers opening a shared link and the back button.
 function searchMatch() {
   const mid = matchIdInput.value.trim()
   if (!mid) return
-  if (route.query.match === mid) loadByMatchId(mid)
-  else router.push({ query: { ...route.query, match: mid } })
+  if (route.params.matchId === mid) loadByMatchId(mid)
+  // Not a number: load directly so the "numbers only" message shows (the route only takes digits).
+  else if (!/^\d+$/.test(mid)) loadByMatchId(mid)
+  else router.push(scoutPath(mid))
 }
 
 const MIN_LOADING_MS = 450
@@ -748,9 +799,19 @@ async function loadByMatchId(mid) {
 // Runs immediately (to load a shared link), so it stays last: everything loadByMatchId reaches, like
 // `settle` and STRATZ_GRACE_MS, has to be initialised before it fires.
 watch(
-  () => route.query.match,
-  mid => {
+  () => route.fullPath,
+  () => {
+    // Old ?match= links: rewritten to the path form.
+    if (typeof route.query.match === 'string' && /^\d+$/.test(route.query.match)) {
+      router.replace(scoutPath(route.query.match))
+      return
+    }
+    const mid = route.params.matchId
     if (typeof mid !== 'string' || !mid) return
+    if (route.params.view) view.value = route.params.view === 'full-game' ? 'full' : 'laning'
+    pendingSection = SLUG_SECTIONS[route.params.section] ?? null
+    // Same match, e.g. the URL was only tidied: nothing to reload.
+    if (match.value?.matchId === Number(mid) || String(match.value?.matchId) === mid) return
     matchIdInput.value = mid
     loadByMatchId(mid)
   },
@@ -1103,7 +1164,6 @@ watch(
           </div>
           <AdvantageChart
             :series="laneSeries(group)"
-            :extras="laneExtras(group)"
             title="Lane Advantage"
             :height="170"
           />
@@ -1289,7 +1349,7 @@ watch(
                       <RouterLink
                         v-for="m in recentMatches(p.accountId)"
                         :key="m.id"
-                        :to="{ query: { ...route.query, match: String(m.id) } }"
+                        :to="scoutPath(m.id)"
                         class="match-row match-link"
                         :title="`Open match ${m.id}`"
                       >
@@ -1504,8 +1564,9 @@ watch(
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--color-border, #2e3542);
 }
-/* Takes the sidebar's spare height and spreads the cards evenly through it (the gap is the minimum). */
-.nav-lanes { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; gap: 0.4rem; }
+/* Takes the sidebar's spare height; the lane cards grow to share it, so the column is filled edge to edge. */
+.nav-lanes { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; }
+.nav-lanes > .lane-card { flex: 1; }
 /* Same frame as the lane cards, for jumping back up to the summary. */
 .nav-summary {
   display: flex;
@@ -1721,7 +1782,8 @@ watch(
 .fb-time { margin-left: 0.2rem; }
 /* Clear the sticky app header when the sidebar jumps here. */
 .summary,
-.lane-panel { scroll-margin-top: 80px; }
+/* Clear of the sticky header when scrolled to, from the sidebar or a linked #section. */
+.lane-panel, .summary { scroll-margin-top: 80px; }
 
 .match-note {
   margin: 0.9rem 0 0;
