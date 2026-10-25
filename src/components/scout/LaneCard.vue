@@ -96,7 +96,7 @@ function share(row) {
   justify-content: space-between;
   gap: 0.5rem;
 }
-.card-title { font-size: 0.85rem; font-weight: 700; }
+.card-title { font-size: var(--fs-md); font-weight: 700; }
 
 .card-heroes {
   display: flex;
@@ -106,7 +106,7 @@ function share(row) {
 }
 .card-heroes em {
   font-style: normal;
-  font-size: 0.68rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
 }
 /* Each side's heroes grouped on its team colour. */
@@ -127,7 +127,7 @@ function share(row) {
 /* Radiant value, a split bar, Dire value: the same reading as the lane breakdown. */
 .card-stats { display: flex; flex-direction: column; gap: 0.15rem; }
 .stats-label {
-  font-size: 0.6rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -140,8 +140,8 @@ function share(row) {
   column-gap: 0.4rem;
   font-variant-numeric: tabular-nums;
 }
-.stat-label { font-size: 0.7rem; color: var(--color-muted, #7a8799); }
-.stat-value { font-size: 0.74rem; font-weight: 600; color: var(--color-muted, #7a8799); }
+.stat-label { font-size: var(--fs-sm); color: var(--color-muted, #7a8799); }
+.stat-value { font-size: var(--fs-sm); font-weight: 600; color: var(--color-muted, #7a8799); }
 .stat-r { text-align: right; }
 .stat-value.ahead { color: var(--color-text); font-weight: 700; }
 

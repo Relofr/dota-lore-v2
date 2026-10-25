@@ -35,6 +35,16 @@ import AppToasts from "@/components/AppToasts.vue";
   --radius: 8px;
   --btn-radius: 999px;
   --radius-sm: 4px;
+
+  /* Reaver for titles; Inter for UI text and numbers (tabular figures, so columns line up). */
+  --font-display: "Reaver Regular", Georgia, serif;
+  --font-ui: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Five-step type scale (1rem = 19.2px here): label, body, emphasis, section title, page title. */
+  --fs-xs: 0.6rem;
+  --fs-sm: 0.7rem;
+  --fs-md: 0.8rem;
+  --fs-lg: 1rem;
+  --fs-xl: 1.6rem;
 }
 
 *,
@@ -57,6 +67,11 @@ html {
 @font-face {
   font-family: "Reaver Regular";
   src: url("./assets/fonts/Reaver-Regular.ttf") format("truetype");
+}
+
+/* Form controls don't inherit the page font by default. */
+button, input, select, textarea {
+  font-family: inherit;
 }
 
 body {

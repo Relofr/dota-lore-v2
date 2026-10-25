@@ -71,7 +71,7 @@ const name = computed(() => (props.player.accountId ? account.value.name || prop
 .kda {
   display: flex;
   gap: 0.35rem;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
@@ -81,7 +81,7 @@ const name = computed(() => (props.player.accountId ? account.value.name || prop
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: #e8c547;
   font-variant-numeric: tabular-nums;
@@ -102,7 +102,7 @@ const name = computed(() => (props.player.accountId ? account.value.name || prop
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.76rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--color-text);
 }

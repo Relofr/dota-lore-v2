@@ -381,6 +381,11 @@ const LANE_METRICS = TEAM_METRICS
   .filter(tm => tm.kind !== 'probability')
   .map(({ split, ...tm }) => ({ ...tm, label: tm.label.replace('Team ', '') }))
 
+// The breakdown goes beside the chart when it has no matchup tables to fill a full-width row.
+function breakdownBesideChart(group) {
+  return !!(group.leads && group.breakdown && !group.breakdown.matchups.length)
+}
+
 function laneSeries(group) {
   const picked = laneMetrics.value[group.key] ?? ['heroDamage']
   return LANE_METRICS.filter(m => picked.includes(m.key)).map(m => heroSeries(m, group.leads))
@@ -1151,6 +1156,8 @@ watch(
           </span>
         </header>
 
+        <!-- A lane with no core/support matchups (mid) has a short breakdown, so it sits beside the chart. -->
+        <div class="lane-top" :class="{ 'with-breakdown': breakdownBesideChart(group) }">
         <div v-if="group.leads" class="lane-chart">
           <div class="chips" role="group" :aria-label="`${group.label} chart measures`">
             <button
@@ -1166,11 +1173,16 @@ watch(
             :series="laneSeries(group)"
             title="Lane Advantage"
             :height="170"
+            :fill="breakdownBesideChart(group)"
           />
         </div>
+        <aside v-if="breakdownBesideChart(group)" class="lane-side">
+          <LaneBreakdown :breakdown="group.breakdown" :outcome="group.outcome" :minute="LANE_MINUTE" />
+        </aside>
+        </div>
 
-        <div class="lane-body" :class="{ 'has-side': group.breakdown }">
-        <aside v-if="group.breakdown" class="lane-side">
+        <div class="lane-body" :class="{ 'has-side': group.breakdown && !breakdownBesideChart(group) }">
+        <aside v-if="group.breakdown && !breakdownBesideChart(group)" class="lane-side">
           <LaneBreakdown :breakdown="group.breakdown" :outcome="group.outcome" :minute="LANE_MINUTE" />
         </aside>
 
@@ -1233,6 +1245,10 @@ watch(
                     </div>
                     <div v-else-if="playerData[p.accountId] && !isPrivate(p)" class="overall-wr">
                       <span class="record">No ranked games · 3 months</span>
+                    </div>
+                    <!-- Always a second line, so every card's header is the same height. -->
+                    <div v-else class="overall-wr">
+                      <span class="record">{{ !p.accountId || isPrivate(p) ? 'Private profile' : 'No stats available' }}</span>
                     </div>
                   </div>
                   <div v-if="p.accountId" class="profile-links">
@@ -1384,7 +1400,9 @@ watch(
 </template>
 
 <style scoped>
+/* UI text in Inter; titles, team names, hero names and the score keep Reaver (--font-display). */
 .scout-page {
+  font-family: var(--font-ui);
   max-width: 1680px;
   margin: 0 auto;
   padding: 2rem 1rem;
@@ -1394,8 +1412,13 @@ watch(
   text-align: center;
   margin-bottom: 1.5rem;
 }
+.scout-title,
+.lane-title,
+.team-label,
+.score,
+.hero-banner-name { font-family: var(--font-display); }
 .scout-title {
-  font-size: 1.8rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
   margin-bottom: 1rem;
   color: var(--color-text);
@@ -1411,7 +1434,7 @@ watch(
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 6px;
   color: var(--color-text);
-  font-size: 0.95rem;
+  font-size: var(--fs-lg);
   padding: 0.6rem 1rem;
   width: 300px;
   max-width: 100%;
@@ -1442,7 +1465,7 @@ watch(
   border-radius: 6px;
   color: #000;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--fs-md);
   font-weight: 600;
   padding: 0.6rem 1.4rem;
   transition: opacity 0.15s;
@@ -1458,12 +1481,13 @@ watch(
 }
 .load-btn:hover:not(:disabled) { opacity: 0.85; }
 
-/* Compact header copy of the search. */
+/* Compact header copy of the search; teleported into the site header, so it sets its own font. */
+.header-search { font-family: var(--font-ui); }
 .header-search { display: flex; align-items: center; gap: 0.5rem; width: 100%; max-width: 380px; }
 .header-input-wrap { flex: 1; min-width: 0; }
-.header-search-input { flex: 1; min-width: 0; width: auto; font-size: 0.85rem; padding: 0.4rem 0.75rem; }
+.header-search-input { flex: 1; min-width: 0; width: auto; font-size: var(--fs-md); padding: 0.4rem 0.75rem; }
 .input-wrap .header-search-input { padding-right: 2rem; }
-.header-search-btn { flex-shrink: 0; font-size: 0.8rem; padding: 0.42rem 0.9rem; white-space: nowrap; }
+.header-search-btn { flex-shrink: 0; font-size: var(--fs-md); padding: 0.42rem 0.9rem; white-space: nowrap; }
 .header-search-enter-active, .header-search-leave-active { transition: opacity 0.15s, transform 0.15s; }
 .header-search-enter-from, .header-search-leave-to { opacity: 0; transform: translateY(-4px); }
 @media (prefers-reduced-motion: reduce) {
@@ -1472,7 +1496,7 @@ watch(
 .error-msg {
   color: #ff6b6b;
   margin-top: 0.75rem;
-  font-size: 0.88rem;
+  font-size: var(--fs-md);
   max-width: 520px;
   margin-left: auto;
   margin-right: auto;
@@ -1504,11 +1528,11 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.78rem;
+  font-size: var(--fs-md);
   line-height: 1.45;
   color: var(--color-muted, #7a8799);
 }
-.parse-text strong { font-size: 0.85rem; color: var(--color-text); }
+.parse-text strong { font-size: var(--fs-md); color: var(--color-text); }
 .parse-note { font-weight: 600; color: var(--color-text); }
 .parse-ok { color: #4bb45f; }
 .parse-bad { color: #e06666; }
@@ -1518,7 +1542,7 @@ watch(
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 999px;
   color: var(--color-text);
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   padding: 0.35rem 0.85rem;
   cursor: pointer;
@@ -1585,10 +1609,10 @@ watch(
 .nav-summary:hover { border-color: rgba(52,191,255,.4); background: rgba(52,191,255,.05); }
 .nav-summary:focus-visible { outline: 2px solid #34bfff; outline-offset: 2px; }
 .nav-summary.active { border-color: rgba(52,191,255,.55); background: rgba(52,191,255,.07); box-shadow: inset 3px 0 0 #34bfff; }
-.nav-summary-title { font-size: 0.85rem; font-weight: 700; }
+.nav-summary-title { font-size: var(--fs-md); font-weight: 700; }
 .nav-summary-head { display: flex; align-items: baseline; gap: 0.5rem; }
-.nav-summary-time { font-size: 0.75rem; color: var(--color-muted, #7a8799); font-variant-numeric: tabular-nums; }
-.nav-summary-score { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.nav-summary-time { font-size: var(--fs-sm); color: var(--color-muted, #7a8799); font-variant-numeric: tabular-nums; }
+.nav-summary-score { display: flex; align-items: center; gap: 0.35rem; font-size: var(--fs-md); font-weight: 700; font-variant-numeric: tabular-nums; }
 .nav-summary-score .nav-winner {
   color: #e8c547;
   padding: 0.05rem 0.35rem;
@@ -1618,7 +1642,7 @@ watch(
 .team-side { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .team-side-right { justify-content: flex-end; }
 .summary-center { text-align: center; }
-.summary-meta { font-size: 0.75rem; color: var(--color-muted, #7a8799); font-variant-numeric: tabular-nums; }
+.summary-meta { font-size: var(--fs-sm); color: var(--color-muted, #7a8799); font-variant-numeric: tabular-nums; }
 
 /* Overview: both lineups side by side above the chart and facts. */
 .lineups {
@@ -1635,7 +1659,7 @@ watch(
 .lineup-slot > :first-child { flex: 1; }
 .lineup-pos {
   text-align: center;
-  font-size: 0.58rem;
+  font-size: var(--fs-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1660,7 +1684,7 @@ watch(
 }
 
 .team-label {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1671,14 +1695,14 @@ watch(
 .dire-label    { background: rgba(200,60,60,.15);  color: #c83c3c; border: 1px solid rgba(200,60,60,.3); }
 /* Plain gold text beside the winning side's badge. */
 .team-result {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #e8c547;
 }
 .score {
-  font-size: 1.6rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
   color: var(--color-text);
   display: flex;
@@ -1687,7 +1711,7 @@ watch(
 }
 .score-sep { color: var(--color-muted, #7a8799); }
 /* Stands in for the score before a match is parsed. */
-.score-vs { font-size: 1rem; font-weight: 600; color: var(--color-muted, #7a8799); }
+.score-vs { font-size: var(--fs-lg); font-weight: 600; color: var(--color-muted, #7a8799); }
 
 /* Pill chips for the view and graph metric pickers. */
 .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
@@ -1696,7 +1720,7 @@ watch(
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 999px;
   color: var(--color-muted, #7a8799);
-  font-size: 0.68rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   line-height: 1.2;
   padding: 0.25rem 0.7rem;
@@ -1720,7 +1744,7 @@ watch(
 /* The page-level time range picker: centred and a touch larger than the graph chips. */
 /* The time range picker: full-width in the sidebar, a touch larger than the graph chips. */
 .view-toggle { margin: 0; flex-wrap: nowrap; }
-.view-toggle button { flex: 1; font-size: 0.74rem; padding: 0.4rem 0.6rem; white-space: nowrap; }
+.view-toggle button { flex: 1; font-size: var(--fs-sm); padding: 0.4rem 0.6rem; white-space: nowrap; }
 /* The key that selects this view. */
 .hotkey {
   display: inline-block;
@@ -1728,7 +1752,7 @@ watch(
   min-width: 1.1em;
   padding: 0 0.25rem;
   font: inherit;
-  font-size: 0.62rem;
+  font-size: var(--fs-xs);
   line-height: 1.35;
   text-align: center;
   border: 1px solid currentColor;
@@ -1762,13 +1786,13 @@ watch(
   padding: 0.3rem 0;
 }
 .fact + .fact { border-top: 1px solid var(--color-border, #2e3542); }
-.fact dt { font-size: 0.73rem; color: var(--color-muted, #7a8799); }
+.fact dt { font-size: var(--fs-sm); color: var(--color-muted, #7a8799); }
 .fact dd {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--color-text);
   text-align: right;
@@ -1778,7 +1802,7 @@ watch(
 .side-dire { color: #c83c3c; }
 .fact-sep { color: var(--color-muted, #7a8799); font-weight: 500; }
 .fact-hero { width: 20px; height: 20px; border-radius: 3px; }
-.fb-verb { font-size: 0.7rem; font-weight: 500; color: var(--color-muted, #7a8799); }
+.fb-verb { font-size: var(--fs-sm); font-weight: 500; color: var(--color-muted, #7a8799); }
 .fb-time { margin-left: 0.2rem; }
 /* Clear the sticky app header when the sidebar jumps here. */
 .summary,
@@ -1787,7 +1811,7 @@ watch(
 
 .match-note {
   margin: 0.9rem 0 0;
-  font-size: 0.7rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
 }
 
@@ -1801,14 +1825,28 @@ watch(
 }
 .lane-title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
   color: var(--color-text);
 }
-.lane-roles { font-size: 0.72rem; color: var(--color-muted, #7a8799); }
+.lane-roles { font-size: var(--fs-sm); color: var(--color-muted, #7a8799); }
 
 /* Above the sticky breakdown panel, so tall chart tooltips aren't drawn underneath it. */
 .lane-chart { margin-bottom: 1rem; position: relative; z-index: 2; }
+/* Chart and breakdown side by side (mid lane); the chart stretches to the breakdown's height. */
+.lane-top.with-breakdown {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  margin-bottom: 1rem;
+}
+.lane-top.with-breakdown .lane-chart { margin-bottom: 0; display: flex; flex-direction: column; }
+.lane-top.with-breakdown .lane-chart .advantage-chart { flex: 1; }
+.lane-top .lane-side { grid-area: auto; }
+@media (max-width: 1000px) {
+  .lane-top.with-breakdown { grid-template-columns: minmax(0, 1fr); }
+}
 
 .lane-body {
   --card-gap: 0.75rem;
@@ -1840,7 +1878,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.66rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1902,7 +1940,9 @@ watch(
   flex-direction: column;
   gap: 0.2rem;
 }
+/* As tall as a rank medal (42px), so unranked players line up with ranked ones. */
 .name-row {
+  min-height: 42px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1910,6 +1950,8 @@ watch(
   min-width: 0;
 }
 .overall-wr {
+  /* One line tall whether it holds text or the loading placeholder. */
+  min-height: 1.5em;
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
@@ -1952,7 +1994,7 @@ watch(
 }
 .player-name {
   min-width: 0;
-  font-size: 0.82rem;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--color-text);
   white-space: nowrap;
@@ -1995,7 +2037,7 @@ watch(
 }
 .hero-banner-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .hero-banner-name {
-  font-size: 1.1rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
   line-height: 1.2;
   color: var(--color-text);
@@ -2004,7 +2046,7 @@ watch(
   text-overflow: ellipsis;
 }
 .hero-banner-pos {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
   white-space: nowrap;
 }
@@ -2016,13 +2058,13 @@ watch(
   /* Separate, not collapsed: cells only take a border radius in this mode. */
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
 }
 .tm-table th,
 .tm-table td { padding: 0.3rem 0.5rem; text-align: right; white-space: nowrap; }
 .tm-table thead th {
-  font-size: 0.6rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2033,7 +2075,7 @@ watch(
   text-align: left;
   padding-left: 0;
   font-weight: 500;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
 }
 .tm-table tbody tr + tr > * { border-top: 1px solid rgba(255,255,255,.04); }
@@ -2086,7 +2128,7 @@ watch(
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 5px;
   color: var(--color-muted, #7a8799);
-  font-size: 0.7rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -2125,7 +2167,7 @@ watch(
 }
 
 .section-loading {
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
   padding: 0.4rem 0;
 }
@@ -2133,7 +2175,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2144,7 +2186,7 @@ watch(
 .section { margin-top: 0.6rem; }
 .section:not(:last-child) { padding-bottom: 0.6rem; }
 .section-label {
-  font-size: 0.68rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -2156,7 +2198,7 @@ watch(
 }
 .items-section { margin-top: 0.75rem; }
 .no-data {
-  font-size: 0.75rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
 }
 
@@ -2183,7 +2225,7 @@ watch(
   border-radius: 3px;
 }
 .hero-name {
-  font-size: 0.78rem;
+  font-size: var(--fs-md);
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
@@ -2202,21 +2244,21 @@ watch(
 .match-link:hover { background: rgba(52,191,255,.08); }
 .match-link:hover .hero-name { color: #34bfff; }
 .match-link:focus-visible { outline: 2px solid #34bfff; outline-offset: -2px; }
-.wr-good, .wr-bad { font-size: 0.76rem; font-weight: 700; }
+.wr-good, .wr-bad { font-size: var(--fs-sm); font-weight: 700; }
 .wr-good { color: #4bb45f; }
 .wr-bad  { color: #c83c3c; }
-.record  { font-size: 0.72rem; color: var(--color-muted, #7a8799); }
-.match-result { font-size: 0.74rem; font-weight: 700; }
+.record  { font-size: var(--fs-sm); color: var(--color-muted, #7a8799); }
+.match-result { font-size: var(--fs-sm); font-weight: 700; }
 .win  { color: #4bb45f; }
 .loss { color: #c83c3c; }
-.match-kda { font-size: 0.74rem; color: var(--color-text); }
+.match-kda { font-size: var(--fs-sm); color: var(--color-text); }
 .match-duration,
 .match-ago {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
 }
 .list-head {
-  font-size: 0.6rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2234,7 +2276,7 @@ watch(
   border: 1px solid var(--color-border, #2e3542);
   border-radius: 4px;
   color: var(--color-muted, #7a8799);
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;

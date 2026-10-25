@@ -41,7 +41,7 @@ defineProps({
 .lineup { min-width: 0; }
 .lineup-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .team-label {
-  font-size: 0.7rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -51,7 +51,7 @@ defineProps({
 .team-radiant { background: rgba(75,180,95,.15); color: #4bb45f; border: 1px solid rgba(75,180,95,.3); }
 .team-dire { background: rgba(200,60,60,.15); color: #c83c3c; border: 1px solid rgba(200,60,60,.3); }
 .team-result {
-  font-size: 0.68rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -73,7 +73,7 @@ defineProps({
   margin: 0 0.25rem;
   padding-bottom: 0.3rem;
   border-bottom: 2px solid var(--party);
-  font-size: 0.6rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;

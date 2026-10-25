@@ -158,7 +158,7 @@ function share(row) {
 
 .section-label {
   font-family: inherit;
-  font-size: 0.68rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -180,7 +180,7 @@ function share(row) {
 
 .headline {
   margin: 0 0 0.85rem;
-  font-size: 0.84rem;
+  font-size: var(--fs-md);
   line-height: 1.45;
   color: var(--color-muted, #7a8799);
 }
@@ -198,14 +198,14 @@ function share(row) {
 .compare-head { padding-bottom: 0.15rem; }
 
 .metric {
-  font-size: 0.73rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
 }
 .side {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.62rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -227,7 +227,7 @@ function share(row) {
 .value {
   display: flex;
   flex-direction: column;
-  font-size: 0.8rem;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--color-muted, #7a8799);
   line-height: 1.2;
@@ -237,7 +237,7 @@ function share(row) {
 .value-d { align-items: flex-start; }
 .value .ahead { color: #fff; font-weight: 700; }
 .value small {
-  font-size: 0.6rem;
+  font-size: var(--fs-xs);
   font-weight: 500;
   line-height: 1.25;
   color: var(--color-muted, #7a8799);
@@ -266,14 +266,14 @@ function share(row) {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.73rem;
+  font-size: var(--fs-sm);
   color: #c9c9c9;
 }
 .note-muted { color: var(--color-muted, #7a8799); }
 .lead-r { color: #4bb45f; font-weight: 600; }
 .lead-d { color: #c83c3c; font-weight: 600; }
 .note-label {
-  font-size: 0.62rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -291,7 +291,7 @@ function share(row) {
   align-items: center;
   gap: 0.5rem;
   white-space: nowrap;
-  font-size: 0.62rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -307,7 +307,7 @@ function share(row) {
 .note-label { margin-right: 0; }
 .ganker { display: inline-flex; align-items: center; gap: 0.2rem; }
 .note-hero { width: 20px; height: 20px; border-radius: 3px; }
-.ganker-count { font-size: 0.7rem; color: var(--color-muted, #7a8799); }
+.ganker-count { font-size: var(--fs-sm); color: var(--color-muted, #7a8799); }
 
 @media (max-width: 520px) {
   .compare-row { grid-template-columns: minmax(0, 1fr) 3.8rem minmax(2.5rem, 4.5rem) 3.8rem; column-gap: 0.45rem; }

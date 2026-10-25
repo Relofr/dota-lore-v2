@@ -41,7 +41,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 <style scoped>
 .match-id { display: inline-flex; align-items: center; gap: 0.2rem; }
 .match-id-text {
-  font-size: 0.78rem;
+  font-size: var(--fs-md);
   color: var(--color-muted, #7a8799);
   font-variant-numeric: tabular-nums;
 }

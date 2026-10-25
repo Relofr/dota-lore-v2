@@ -12,7 +12,7 @@ defineProps({
 <style scoped>
 .lane-outcome {
   display: inline-block;
-  font-size: 0.66rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;

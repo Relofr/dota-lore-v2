@@ -603,7 +603,7 @@ const summary = computed(() => props.series
   margin-bottom: 0.3rem;
 }
 .chart-title {
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--color-text);
 }
@@ -612,7 +612,7 @@ const summary = computed(() => props.series
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.66rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
 }
 /* Same square as the lane breakdown's key. */
@@ -650,7 +650,7 @@ const summary = computed(() => props.series
 .grid line { stroke: #2a3140; stroke-width: 1; shape-rendering: crispEdges; }
 .grid line.zero { stroke: #4a5366; }
 .y-ticks text, .x-ticks text {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   fill: var(--color-muted, #7a8799);
   font-variant-numeric: tabular-nums;
 }
@@ -659,7 +659,7 @@ const summary = computed(() => props.series
 
 .x-label {
   text-align: center;
-  font-size: 0.6rem;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-muted, #7a8799);
@@ -712,7 +712,7 @@ const summary = computed(() => props.series
   font-variant-numeric: tabular-nums;
 }
 .tt-time {
-  font-size: 0.66rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
   margin-bottom: 0.2rem;
 }
@@ -720,16 +720,16 @@ const summary = computed(() => props.series
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
 .tt-row strong { color: var(--color-text); font-weight: 700; min-width: 3.2rem; }
 /* Level-up (or other) marks on a line, ringed in the surface colour so they read over other lines. */
 .line-dot { stroke: var(--color-surface, #1a1f2b); stroke-width: 1; pointer-events: none; }
 /* Supporting numbers beside a value, e.g. last hits/denies next to net worth. */
-.tt-detail { margin-left: 0.3rem; font-size: 0.64rem; font-weight: 500; color: var(--color-muted, #7a8799); }
+.tt-detail { margin-left: 0.3rem; font-size: var(--fs-sm); font-weight: 500; color: var(--color-muted, #7a8799); }
 .tt-side-total { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--color-text); margin-left: 0.25rem; }
-.tt-col { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.25rem; font-size: 0.6rem; color: var(--color-muted, #7a8799); }
+.tt-col { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.25rem; font-size: var(--fs-xs); color: var(--color-muted, #7a8799); }
 .tt-col i { display: inline-block; width: 10px; border-top: 2px solid currentColor; }
 /* The objective icons again, in the legend and tooltip. */
 .key-icon { display: block; height: 14px; width: auto; }
@@ -737,7 +737,7 @@ const summary = computed(() => props.series
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
   white-space: nowrap;
   margin-bottom: 0.15rem;
@@ -749,7 +749,7 @@ const summary = computed(() => props.series
   border-top: 1px solid #2e3542;
 }
 .tt-side {
-  font-size: 0.6rem;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -761,7 +761,7 @@ const summary = computed(() => props.series
   grid-template-columns: 20px repeat(var(--cols), minmax(2.6rem, auto));
   align-items: center;
   column-gap: 0.5rem;
-  font-size: 0.72rem;
+  font-size: var(--fs-sm);
   padding: 0.08rem 0;
   white-space: nowrap;
 }
