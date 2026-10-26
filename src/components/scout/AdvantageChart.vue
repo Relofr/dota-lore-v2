@@ -6,10 +6,14 @@ import HeroIcon from './HeroIcon.vue'
 const props = defineProps({
   // [{ key, label, short, kind: 'lead' | 'probability' | 'perHero', values, step, color }]. Leads are Radiant
   // minus Dire; probabilities are Radiant's win probability, 0–1. A perHero series has `heroes: [{ key, hero,
-  // isRadiant, values, dots }]` instead of values: one line per hero, labelled with the hero's icon; `dots`
+  // isRadiant, color, values, dots }]` instead of values: one line per hero in the hero's player colour,
+  // labelled with the hero's icon; `dots`
   // (seconds, e.g. level-ups) are marked on the line. Leads and probabilities share a chart split at zero
   // (Radiant above, Dire below); perHero series get a plain chart from zero up. Don't mix the two.
-  // `short` names a perHero series' column in the tooltip. Each series keeps its own step (seconds per point).
+  // A lead series may carry `heroes` (same shape) instead of values: its line is then the shown Radiant
+  // heroes' total minus the shown Dire heroes', so the hero toggles choose who counts.
+  // `short` names a perHero series' column in the tooltip. Optional `minPeak` (default 200) is the
+  // smallest top of scale, and `format(v)` formats a tooltip value (default: compact number). Each series keeps its own step (seconds per point).
   // A series, or a perHero series' hero, may have `detail(t)`: extra text shown beside its tooltip value
   // (e.g. last hits/denies next to net worth).
   series: { type: Array, required: true },
@@ -68,25 +72,39 @@ const hiddenHeroes = ref(new Set())
 const toggleHeroes = computed(() => {
   const byKey = new Map()
   for (const s of props.series) {
-    if (s.kind !== 'perHero') continue
-    for (const hr of s.heroes) if (!byKey.has(hr.key)) byKey.set(hr.key, { key: hr.key, hero: hr.hero, isRadiant: hr.isRadiant })
+    if (!s.heroes) continue
+    for (const hr of s.heroes) if (!byKey.has(hr.key)) byKey.set(hr.key, { key: hr.key, hero: hr.hero, isRadiant: hr.isRadiant, color: heroColor(hr) })
   }
   return [...byKey.values()].sort((a, b) => Number(b.isRadiant) - Number(a.isRadiant))
 })
 
-// The colours of a hero's lines, one per per-hero measure shown: team colour when there's a single measure,
-// each measure's own colour when several are overlaid. Drawn under the hero's toggle as its line key.
-function heroKeyColors(t) {
-  const perHero = props.series.filter(s => s.kind === 'perHero')
-  if (perHero.length <= 1) return [t.isRadiant ? RADIANT : DIRE]
-  return perHero.map(s => s.color)
+// Per-hero lines are coloured by hero (their in-game player colour), so overlaid measures are told apart
+// by line style instead, in this order: solid, dashed, dotted. `border` is the matching CSS border style
+// for keys drawn with borders.
+const LINE_STYLES = [
+  { dash: null, border: 'solid' },
+  { dash: '7 4', border: 'dashed' },
+  { dash: '1 4', border: 'dotted' },
+]
+function lineStyle(seriesKey) {
+  const i = props.series.filter(s => s.kind === 'perHero').findIndex(s => s.key === seriesKey)
+  return LINE_STYLES[Math.max(0, i) % LINE_STYLES.length]
 }
 
-// Hides or shows a hero's lines, keeping at least one hero on.
+// A hero's line key under its toggle: one segment per per-hero measure shown, in the hero's colour and
+// each measure's line style.
+function heroKeySegments(t) {
+  const perHero = props.series.filter(s => s.kind === 'perHero')
+  // No per-hero lines (a team lead chart): the hero counts towards their team's line, so the team colour.
+  if (!perHero.length) return [{ key: 'team', color: t.isRadiant ? RADIANT : DIRE, border: 'solid' }]
+  return perHero.map(s => ({ key: s.key, color: t.color, border: lineStyle(s.key).border }))
+}
+
+// Hides or shows a hero's lines.
 function toggleHero(key) {
   const next = new Set(hiddenHeroes.value)
   if (next.has(key)) next.delete(key)
-  else if (toggleHeroes.value.some(t => t.key !== key && !next.has(t.key))) next.add(key)
+  else next.add(key)
   hiddenHeroes.value = next
 }
 
@@ -108,18 +126,28 @@ const toggleSides = computed(() => [true, false]
 
 const sideShown = side => side.heroes.some(t => !hiddenHeroes.value.has(t.key))
 
-// Shows a side's heroes if all are hidden, otherwise hides them all, unless that would leave nothing shown.
+// Shows a side's heroes if all are hidden, otherwise hides them all.
 function toggleSide(side) {
   const next = new Set(hiddenHeroes.value)
   if (!sideShown(side)) side.heroes.forEach(t => next.delete(t.key))
-  else if (toggleHeroes.value.some(t => t.isRadiant !== side.heroes[0].isRadiant && !next.has(t.key))) side.heroes.forEach(t => next.add(t.key))
+  else side.heroes.forEach(t => next.add(t.key))
   hiddenHeroes.value = next
 }
 
 // The series with hidden heroes left out, so lines, scaling and the tooltip all follow the toggles.
-const shown = computed(() => props.series.map(s => (s.kind === 'perHero'
-  ? { ...s, heroes: s.heroes.filter(hr => !hiddenHeroes.value.has(hr.key)) }
-  : s)))
+const shown = computed(() => props.series.map(s => {
+  if (!s.heroes) return s
+  const heroes = s.heroes.filter(hr => !hiddenHeroes.value.has(hr.key))
+  if (s.kind === 'perHero') return { ...s, heroes }
+  return { ...s, values: heroLead(heroes) }
+}))
+
+// Radiant's shown heroes' total minus Dire's, point by point; empty when no hero is shown.
+function heroLead(heroes) {
+  if (!heroes.length) return []
+  const len = Math.min(...heroes.map(hr => hr.values.length))
+  return Array.from({ length: len }, (_, i) => heroes.reduce((sum, hr) => sum + (hr.isRadiant ? 1 : -1) * (hr.values[i] ?? 0), 0))
+}
 
 const hasPerHero = computed(() => props.series.some(s => s.kind === 'perHero'))
 const padR = computed(() => (hasPerHero.value ? END_ICON + 8 : PAD.r))
@@ -145,14 +173,22 @@ const pointCount = s => (s.kind === 'perHero' ? Math.max(0, ...s.heroes.map(hr =
 
 const scaled = computed(() => shown.value.map(s => {
   if (s.kind === 'probability') return { ...s, norm: v => (v - 0.5) * 2 }
-  const peak = Math.max(200, ...allValues(s).map(Math.abs))
+  const peak = Math.max(s.minPeak ?? 200, ...allValues(s).map(Math.abs))
   const unit = niceStep(peak, 3)
   const scale = single.value ? Math.ceil(peak / unit) * unit : peak
   return { ...s, unit, scale, norm: v => v / scale }
 }))
 
 const duration = computed(() => Math.max(60, ...shown.value.map(s => (pointCount(s) - 1) * s.step)))
-const finest = computed(() => Math.min(...props.series.map(s => s.step)))
+// 60 when nothing is shown, so hover snapping still has a step.
+const finest = computed(() => Math.min(60, ...props.series.map(s => s.step)))
+
+// Nothing to draw: no measure picked, or every hero hidden. The axes stay, with a hint in the middle.
+const emptyHint = computed(() => {
+  if (!props.series.length) return 'Select a measure above to show it'
+  const nothingLeft = shown.value.every(s => (s.kind === 'perHero' ? !s.heroes.length : !s.values?.length))
+  return nothingLeft ? 'Select a hero below to show their line' : null
+})
 
 const x = t => PAD.l + (t / duration.value) * plotW.value
 // Split: n runs -1 (Dire) to 1 (Radiant) with zero mid-height. Normal: 0 at the bottom to 1 at the top.
@@ -166,27 +202,18 @@ const lines = computed(() => scaled.value.map(s => ({ ...s, d: s.kind === 'perHe
 
 const perHeroSeries = computed(() => scaled.value.filter(s => s.kind === 'perHero'))
 
-// Heroes whose lines are dashed: the second hero on a side that has exactly two (a lane's core and support),
-// so the pair stays apart where they cross. Worked out from all heroes, not just the visible ones, so a
-// line's style (and its key under the chart) doesn't change when the other hero is hidden.
-const dashedHeroes = computed(() => {
-  const dashed = new Set()
-  const first = props.series.find(s => s.kind === 'perHero')
-  for (const isRadiant of [true, false]) {
-    const side = first?.heroes.filter(hr => hr.isRadiant === isRadiant) ?? []
-    if (side.length === 2) dashed.add(side[1].key)
-  }
-  return dashed
-})
+// A hero's line colour: their player colour, or the team colour if none was given.
+const heroColor = hr => hr.color ?? (hr.isRadiant ? RADIANT : DIRE)
 
-// One line per hero for perHero series (Radiant's up and Dire's down in a split chart). In a lane, a
-// side's second hero is dashed (see dashedHeroes); with a whole team the icons tell them apart.
+// One line per hero for perHero series (Radiant's up and Dire's down in a split chart), each in the hero's
+// player colour and its measure's line style.
 const heroTracks = computed(() => perHeroSeries.value.flatMap(s => {
   return s.heroes.map(hr => {
     const side = hr.isRadiant ? 'radiant' : 'dire'
     const sign = normal.value || hr.isRadiant ? 1 : -1
     const last = hr.values.length - 1
-    const at = t => valueAt({ values: hr.values, step: s.step }, t)
+    // Interpolated, so marks between data points sit on the line drawn between them.
+    const at = t => valueBetween(hr.values, s.step, t)
     return {
       key: `${s.key}:${hr.key}`,
       heroKey: hr.key,
@@ -197,8 +224,9 @@ const heroTracks = computed(() => perHeroSeries.value.flatMap(s => {
       values: hr.values,
       side,
       sign,
-      dashed: dashedHeroes.value.has(hr.key),
-      color: single.value ? (hr.isRadiant ? RADIANT : DIRE) : s.color,
+      dash: lineStyle(s.key).dash,
+      border: lineStyle(s.key).border,
+      color: heroColor(hr),
       d: path(s, hr.values, sign),
       endX: x(last * s.step),
       endY: y(s.norm(sign * (hr.values[last] ?? 0))),
@@ -263,6 +291,15 @@ const xTicks = computed(() => {
   for (let m = 0; m <= lastMinute; m += every) ticks.push({ t: m * 60, label: m })
   return ticks
 })
+
+// The value at time t on the straight line between the points either side, as the chart draws it; null
+// past the last point.
+function valueBetween(values, step, t) {
+  const pos = t / step
+  const i = Math.floor(pos)
+  if (i >= values.length - 1) return i === values.length - 1 ? values[i] : null
+  return values[i] + (values[i + 1] - values[i]) * (pos - i)
+}
 
 // The series' value at time t, or null past its last point (Stratz's win probabilities can stop short).
 function valueAt(s, t) {
@@ -352,7 +389,10 @@ const heroSections = computed(() => {
       row.details[t.s.key] = t.detail?.(hover.value) ?? null
     }
     const rows = [...heroes.values()]
-    const totals = perHeroSeries.value.map(s => rows.reduce((sum, r) => sum + (r.cells[s.key] ?? 0), 0))
+    const totals = perHeroSeries.value.map(s => {
+      const sum = rows.reduce((acc, r) => acc + (r.cells[s.key] ?? 0), 0)
+      return s.format ? s.format(sum) : compact(sum)
+    })
     return { key: isRadiant ? 'radiant' : 'dire', label: isRadiant ? 'Radiant' : 'Dire', rows, totals }
   }).filter(sec => sec.rows.length)
 })
@@ -365,11 +405,13 @@ const tooltipStyle = computed(() => {
 
 const heading = computed(() => (single.value ? props.series[0].label : props.title))
 
-const summary = computed(() => props.series
+// From the shown series: a hero-built lead only has values once its shown heroes are summed.
+const summary = computed(() => shown.value
   .map(s => {
     if (s.kind === 'perHero') {
       return `${s.label}: ${s.heroes.map(hr => `${hr.hero?.displayName ?? 'Hero'} ${compact(hr.values.at(-1) ?? 0)}`).join(', ')}`
     }
+    if (!s.values?.length) return `${s.label}: no heroes shown`
     const end = s.values.at(-1) ?? 0
     return `${s.label}: ${display(s, end)} ${sideShort(s, end)} at ${formatTime((s.values.length - 1) * s.step)}`
   })
@@ -383,7 +425,15 @@ const summary = computed(() => props.series
         {{ heading }}
       </span>
       <span class="legend">
-        <template v-if="single">
+        <!-- Per-hero charts are keyed by the hero toggles below; several measures get a line-style key here. -->
+        <template v-if="normal">
+          <template v-if="!single">
+            <span v-for="s in series" :key="s.key" class="key">
+              <i class="key-line key-neutral" :style="{ borderTopStyle: lineStyle(s.key).border }" />{{ s.label }}
+            </span>
+          </template>
+        </template>
+        <template v-else-if="single">
           <span class="key"><i :style="{ background: RADIANT }" />Radiant</span>
           <span class="key"><i :style="{ background: DIRE }" />Dire</span>
         </template>
@@ -398,6 +448,7 @@ const summary = computed(() => props.series
       </span>
     </div>
     <div ref="body" class="chart-body" :style="fill ? { minHeight: `${height}px` } : null">
+      <div v-if="emptyHint" class="empty-hint">{{ emptyHint }}</div>
       <svg
         :width="width"
         :height="h"
@@ -432,7 +483,7 @@ const summary = computed(() => props.series
         </g>
 
         <!-- One lead or probability series: green above the line and red below. -->
-        <template v-if="single && lines[0].kind !== 'perHero'">
+        <template v-if="single && lines[0].kind !== 'perHero' && lines[0].values.length">
           <path
             :d="`${lines[0].d}L${x((lines[0].values.length - 1) * lines[0].step).toFixed(1)},${zeroY.toFixed(1)}L${x(0).toFixed(1)},${zeroY.toFixed(1)}Z`"
             :fill="RADIANT" fill-opacity="0.12" :clip-path="`url(#${uid}-above)`"
@@ -462,7 +513,7 @@ const summary = computed(() => props.series
           :d="t.d"
           class="line"
           :stroke="t.color"
-          :stroke-dasharray="t.dashed ? '6 3' : null"
+          :stroke-dasharray="t.dash"
         />
         <circle
           v-for="dot in heroTracks.flatMap(t => t.dots.map(d => ({ ...d, key: `${t.key}:${d.t}`, color: t.color })))"
@@ -529,24 +580,23 @@ const summary = computed(() => props.series
           <span>{{ r.s.label }} · {{ sideShort(r.s, r.v) }}</span>
           <small v-if="r.s.detail" class="tt-detail">{{ r.s.detail(hover) }}</small>
         </div>
-        <div v-for="sec in heroSections" :key="sec.key" class="tt-heroes" :style="{ '--cols': perHeroSeries.length }">
-          <div class="tt-side">
-            {{ sec.label }}
-            <span class="tt-side-total">({{ sec.totals.map(compact).join(' · ') }})</span>
-          </div>
-          <!-- Column names, with each measure's line colour when several are shown. -->
-          <div class="tt-hero tt-hero-key">
-            <span />
-            <span v-for="s in perHeroSeries" :key="s.key" class="tt-col">
-              <i v-if="!single" :style="{ color: s.color }" />{{ s.short ?? s.label }}
-            </span>
-          </div>
-          <div v-for="r in sec.rows" :key="r.key" class="tt-hero">
-            <HeroIcon :hero="r.hero" class="tt-hero-icon" />
-            <strong v-for="s in perHeroSeries" :key="s.key">
-              {{ r.cells[s.key] == null ? '—' : compact(r.cells[s.key]) }}<small v-if="r.details[s.key]" class="tt-detail">{{ r.details[s.key] }}</small>
-            </strong>
-          </div>
+        <!-- One grid for both teams, so every column lines up: measure names once, then per team a totals
+             row (team name, its totals under each column) followed by its heroes. -->
+        <div v-if="heroSections.length" class="tt-table" :style="{ '--cols': perHeroSeries.length }">
+          <span />
+          <span v-for="s in perHeroSeries" :key="s.key" class="tt-col">
+            <i v-if="!single" class="key-neutral" :style="{ borderTopStyle: lineStyle(s.key).border }" />{{ s.short ?? s.label }}
+          </span>
+          <template v-for="sec in heroSections" :key="sec.key">
+            <span class="tt-side tt-sep tt-sum" :class="[`tt-side-${sec.key}`, `tt-sum-${sec.key}`]">{{ sec.label }}</span>
+            <strong v-for="(total, i) in sec.totals" :key="i" class="tt-total tt-sep tt-sum" :class="`tt-sum-${sec.key}`">{{ total }}</strong>
+            <template v-for="r in sec.rows" :key="r.key">
+              <HeroIcon :hero="r.hero" class="tt-hero-icon" />
+              <strong v-for="s in perHeroSeries" :key="s.key" class="tt-cell">
+                {{ r.cells[s.key] == null ? '—' : s.format ? s.format(r.cells[s.key]) : compact(r.cells[s.key]) }}<small v-if="r.details[s.key]" class="tt-detail">{{ r.details[s.key] }}</small>
+              </strong>
+            </template>
+          </template>
         </div>
       </div>
     </div>
@@ -574,15 +624,15 @@ const summary = computed(() => props.series
           :key="t.key"
           type="button"
           class="hero-toggle"
-          :class="[t.isRadiant ? 'toggle-radiant' : 'toggle-dire', { off: hiddenHeroes.has(t.key), dashed: dashedHeroes.has(t.key) }]"
+          :class="[t.isRadiant ? 'toggle-radiant' : 'toggle-dire', { off: hiddenHeroes.has(t.key) }]"
           :aria-pressed="!hiddenHeroes.has(t.key)"
           :title="`${hiddenHeroes.has(t.key) ? 'Show' : 'Hide'} ${t.hero?.displayName ?? 'hero'}`"
           @click="toggleHero(t.key)"
         >
           <HeroIcon :hero="t.hero" class="hero-toggle-icon" />
-          <!-- This hero's line key: a segment per line colour, dashed if the hero's lines are. -->
+          <!-- This hero's line key: their colour, one segment per measure in that measure's line style. -->
           <span class="hero-key-line" aria-hidden="true">
-            <i v-for="(c, ci) in heroKeyColors(t)" :key="ci" :style="{ color: c }" />
+            <i v-for="seg in heroKeySegments(t)" :key="seg.key" :style="{ color: seg.color, borderTopStyle: seg.border }" />
           </span>
         </button>
       </div>
@@ -635,6 +685,17 @@ const summary = computed(() => props.series
 .tt-row i.dashed { border-top-style: dashed; }
 
 .chart-body { position: relative; }
+.empty-hint {
+  position: absolute;
+  inset: 0 0 22px 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  color: var(--color-muted, #7a8799);
+  pointer-events: none;
+  z-index: 1;
+}
 /* In fill mode the body takes the spare height and the SVG is sized from it, so it can't push back. */
 .advantage-chart.fill { display: flex; flex-direction: column; height: 100%; }
 .advantage-chart.fill .chart-body { flex: 1; }
@@ -692,7 +753,6 @@ const summary = computed(() => props.series
 .hero-toggles .hero-toggle:not(.side-toggle) { border-bottom-color: transparent; }
 .hero-key-line { display: flex; gap: 1px; }
 .hero-key-line i { flex: 1; border-top: 2px solid currentColor; }
-.hero-toggle.dashed .hero-key-line i { border-top-style: dashed; }
 .hero-toggle.off .hero-key-line i { color: var(--color-border, #2e3542) !important; }
 .hero-toggle.off { opacity: 0.35; filter: grayscale(1); border-bottom-color: var(--color-border, #2e3542); }
 .hero-toggle:hover { opacity: 1; }
@@ -722,15 +782,18 @@ const summary = computed(() => props.series
   gap: 0.4rem;
   font-size: var(--fs-sm);
   white-space: nowrap;
+  /* Equal-width digits, so columns don't shift as the hovered values change. */
+  font-variant-numeric: tabular-nums;
 }
 .tt-row strong { color: var(--color-text); font-weight: 700; min-width: 3.2rem; }
 /* Level-up (or other) marks on a line, ringed in the surface colour so they read over other lines. */
 .line-dot { stroke: var(--color-surface, #1a1f2b); stroke-width: 1; pointer-events: none; }
 /* Supporting numbers beside a value, e.g. last hits/denies next to net worth. */
 .tt-detail { margin-left: 0.3rem; font-size: var(--fs-sm); font-weight: 500; color: var(--color-muted, #7a8799); }
-.tt-side-total { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--color-text); margin-left: 0.25rem; }
 .tt-col { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.25rem; font-size: var(--fs-xs); color: var(--color-muted, #7a8799); }
-.tt-col i { display: inline-block; width: 10px; border-top: 2px solid currentColor; }
+.tt-col i { display: inline-block; width: 12px; border-top: 2px solid currentColor; }
+/* Line-style keys that stand for a measure rather than a colour. */
+.key-neutral { color: var(--color-text); }
 /* The objective icons again, in the legend and tooltip. */
 .key-icon { display: block; height: 14px; width: auto; }
 .tt-event {
@@ -743,29 +806,51 @@ const summary = computed(() => props.series
   margin-bottom: 0.15rem;
 }
 .tt-event :deep(img), .tt-event-hero { width: 18px; height: 18px; border-radius: 3px; object-fit: cover; }
-.tt-heroes {
+/* Per-team table: a label/icon column, then one right-aligned column per measure. */
+.tt-table {
+  display: grid;
+  grid-template-columns: auto repeat(var(--cols), minmax(2.6rem, auto));
+  align-items: center;
+  /* No column gap (it would break the totals band); cells are spaced with padding instead. */
+  column-gap: 0;
+  row-gap: 0.12rem;
   margin-top: 0.35rem;
   padding-top: 0.3rem;
   border-top: 1px solid #2e3542;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
 }
+/* A team's totals row: a rule above, the team name in its colour, totals in bold. */
+.tt-sep { margin-top: 0.3rem; padding-top: 0.25rem; border-top: 1px solid #2e3542; }
+/* The totals row as a band: tinted in the team colour and underlined in it, apart from the heroes below. */
+/* Fixed height with the contents centred, so the band never resizes with its numbers. */
+.tt-sum {
+  box-sizing: border-box;
+  height: 1.7rem;
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.15rem;
+  border-bottom: 1px solid;
+  line-height: 1;
+}
+.tt-total.tt-sum { justify-content: flex-end; }
+/* The rule above the band comes from .tt-sep; no extra top padding inside the fixed height. */
+.tt-sep.tt-sum { padding-top: 0; }
+.tt-sum-radiant { background: rgba(75,180,95,.1); border-bottom-color: rgba(75,180,95,.55); }
+.tt-sum-dire { background: rgba(200,60,60,.1); border-bottom-color: rgba(200,60,60,.55); }
+/* Same padding on every value column, so the band has clean ends and the numbers stay aligned. */
+.tt-table .tt-col, .tt-total, .tt-cell { padding-left: 0.6rem; padding-right: 0.35rem; }
+.tt-side.tt-sum { padding-left: 0.35rem; padding-right: 0.35rem; }
 .tt-side {
   font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-muted, #7a8799);
-  margin-bottom: 0.15rem;
 }
-.tt-hero {
-  display: grid;
-  grid-template-columns: 20px repeat(var(--cols), minmax(2.6rem, auto));
-  align-items: center;
-  column-gap: 0.5rem;
-  font-size: var(--fs-sm);
-  padding: 0.08rem 0;
-  white-space: nowrap;
-}
-.tt-hero :deep(img) { width: 20px; height: 20px; border-radius: 3px; object-fit: cover; }
-.tt-hero strong { color: var(--color-text); font-weight: 700; text-align: right; }
+.tt-side-radiant { color: #4bb45f; }
+.tt-side-dire { color: #c83c3c; }
+.tt-total { text-align: right; font-weight: 800; color: var(--color-text); }
+.tt-cell { text-align: right; font-weight: 600; color: var(--color-text); }
+.tt-table :deep(img), .tt-hero-icon { display: block; width: 20px; height: 20px; border-radius: 3px; object-fit: cover; }
 .tt-row span { color: var(--color-muted, #7a8799); }
 </style>

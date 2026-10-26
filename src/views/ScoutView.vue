@@ -276,16 +276,40 @@ const TEAM_METRICS = [
 
 // A measure drawn hero by hero: each one's running total as a plain line. Experience also marks each
 // level-up on the line. `leads` is a leadSeries() result, which carries every hero's series.
-function heroSeries(m, leads) {
+// Dota's player colours: Radiant slots 0–4, then Dire slots 128–132.
+const PLAYER_COLORS = ['#3375ff', '#66ffbf', '#bf00bf', '#f3f00b', '#ff6b00', '#fe86c2', '#a1b447', '#65d9f7', '#008321', '#a46900']
+function playerColor(p) {
+  const slot = p.thisMatch?.playerSlot
+  if (slot == null) return null
+  return PLAYER_COLORS[slot < 128 ? slot : slot - 128 + 5] ?? null
+}
+
+// A hero's level at second t from the times they reached each level, rising evenly between level-ups so
+// the line passes through each level-up at a whole level (where its dot is drawn).
+function levelAt(times, t) {
+  let i = 0
+  while (i + 1 < times.length && times[i + 1] <= t) i++
+  const next = times[i + 1]
+  if (next == null || t < times[0]) return i + 1
+  return i + 1 + (t - times[i]) / (next - times[i])
+}
+
+// Experience is drawn as each hero's level (unless `levels` is false, for the team XP lead).
+function heroSeries(m, leads, { levels = true } = {}) {
+  const asLevels = levels && m.key === 'experience'
   return {
     ...m,
+    ...(asLevels ? { label: 'Level', short: 'Level', minPeak: 5, format: v => String(Math.floor(v)) } : {}),
     kind: 'perHero',
     step: leads.step,
     heroes: leads.heroes.map(h => ({
       key: h.player.thisMatch.playerSlot ?? h.player.heroId,
       hero: h.player.thisMatch.hero,
       isRadiant: h.player.isRadiant,
-      values: windowed(h[m.key], leads.step),
+      color: playerColor(h.player),
+      values: asLevels
+        ? windowed(h.experience.map((_, i) => levelAt(h.player.thisMatch.stats?.level ?? [], i * leads.step)), leads.step)
+        : windowed(h[m.key], leads.step),
       // Level 1 is at the start, so only the level-ups after it.
       dots: m.key === 'experience' ? (h.player.thisMatch.stats?.level ?? []).slice(1) : null,
       // Net worth shows the hero's last hits/denies beside it.
@@ -325,11 +349,15 @@ function teamMetricSeries(tm) {
   if (!tm.split) return teamLeads.value ? heroSeries(tm, teamLeads.value) : null
   const leads = teamLeads.value
   const lead = { ...tm, kind: 'lead', detail: tm.key === 'networth' && leads ? t => teamCsText(leads, t) : null }
-  // Per-second in the laning view once playback is in; otherwise Stratz's own per-minute team leads.
-  if (fine.value && teamLeads.value) return { ...lead, values: windowed(teamLeads.value[tm.key], teamLeads.value.step), step: teamLeads.value.step }
+  // Built from each hero's own series, so the chart's hero toggles can choose who counts towards each
+  // team's line (per-second in the laning view once playback is in).
+  if (leads) {
+    const { heroes, step } = heroSeries(tm, leads, { levels: false })
+    return { ...lead, heroes: heroes.map(({ dots, detail, ...hr }) => hr), step }
+  }
+  // No per-player timelines: Stratz's own per-minute team leads, without hero selection.
   const source = tm.key === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
-  if (source?.length) return { ...lead, values: windowed(source), step: 60 }
-  return teamLeads.value ? { ...lead, values: windowed(teamLeads.value[tm.key], teamLeads.value.step), step: teamLeads.value.step } : null
+  return source?.length ? { ...lead, values: windowed(source), step: 60 } : null
 }
 
 // Every measure this match has data for, so a chip only shows when it can draw something.
@@ -337,19 +365,20 @@ const teamAvailable = computed(() => {
   if (!match.value) return []
   return TEAM_METRICS
     .map(teamMetricSeries)
-    .filter(s => s?.values?.length || s?.heroes?.some(hr => hr.values.length))
+    .filter(s => s?.values?.length || s?.heroes?.some(hr => hr.values?.length))
 })
 
 const teamSeries = computed(() => {
   const picked = teamAvailable.value.filter(tm => teamMetrics.value.includes(tm.key))
-  // Falls back to the first measure if nothing picked has data (e.g. no win probability for this match).
-  return picked.length ? picked : teamAvailable.value.slice(0, 1)
+  // Nothing picked is allowed (an empty chart). Falls back to the first measure only when the picks exist
+  // but this match has no data for them (e.g. no win probability).
+  if (picked.length || !teamMetrics.value.length) return picked
+  return teamAvailable.value.slice(0, 1)
 })
 
-// The measures shown after toggling `key`, never dropping the last one: a chart always shows something.
+// The measures shown after toggling `key` on or off; an empty list is allowed (the chart shows a hint).
 function toggled(shown, key) {
-  if (!shown.includes(key)) return [...shown, key]
-  return shown.length > 1 ? shown.filter(k => k !== key) : shown
+  return shown.includes(key) ? shown.filter(k => k !== key) : [...shown, key]
 }
 
 // Picking a measure of the other kind (team vs hero by hero) starts the chart over with just that one.
@@ -377,9 +406,10 @@ function windowed(values, step = 60) {
 }
 
 // Same measures, order and colours as the summary chart, minus win probability; all hero by hero here.
+// Experience is shown as hero levels here, so its chip reads "Level".
 const LANE_METRICS = TEAM_METRICS
   .filter(tm => tm.kind !== 'probability')
-  .map(({ split, ...tm }) => ({ ...tm, label: tm.label.replace('Team ', '') }))
+  .map(({ split, ...tm }) => ({ ...tm, label: tm.label.replace('Team ', ''), ...(tm.key === 'experience' ? { tab: 'Level' } : {}) }))
 
 // The breakdown goes beside the chart when it has no matchup tables to fill a full-width row.
 function breakdownBesideChart(group) {
@@ -729,17 +759,20 @@ const settle = promise => promise.then(value => ({ ok: true, value }), reason =>
 
 // Stratz first, as it has the most (lane outcomes, win probability, per-second playback). If it fails, is
 // slow, or hasn't parsed the match, OpenDota fills in: its parsed data beats an unparsed Stratz match.
-// Resolves to { data, source }; rejects only when neither has the match.
+// Resolves to { data, source, reason }; rejects only when neither has the match. `reason` says why
+// OpenDota was used: 'unparsed' (Stratz has the match but not parsed), 'unavailable' (Stratz errored) or
+// 'slow' (Stratz hadn't answered within the grace period).
 async function fetchMatchFromEither(mid) {
   const stratz = settle(fetchMatchPlayers(mid))
   let sz = await Promise.race([stratz, new Promise(resolve => setTimeout(() => resolve(null), STRATZ_GRACE_MS))])
   if (sz?.ok && isParsedMatch(sz.value)) return { data: sz.value, source: 'stratz' }
 
   const od = await settle(fetchOpenDotaMatch(mid))
-  if (od.ok && isParsedMatch(od.value)) return { data: od.value, source: 'opendota' }
+  const reason = !sz ? 'slow' : sz.ok ? 'unparsed' : 'unavailable'
+  if (od.ok && isParsedMatch(od.value)) return { data: od.value, source: 'opendota', reason }
   sz ??= await stratz
   if (sz.ok && sz.value?.players?.length) return { data: sz.value, source: 'stratz' }
-  if (od.ok && od.value?.players?.length) return { data: od.value, source: 'opendota' }
+  if (od.ok && od.value?.players?.length) return { data: od.value, source: 'opendota', reason }
   console.error('[Scout] match:', sz.reason?.message, od.reason?.message)
   throw new Error(`Couldn’t load match ${mid} from Stratz or OpenDota.`)
 }
@@ -755,7 +788,7 @@ async function loadByMatchId(mid) {
   resetState()
   const started = Date.now()
   try {
-    const { data, source } = await fetchMatchFromEither(mid)
+    const { data, source, reason } = await fetchMatchFromEither(mid)
     // Cached matches come back instantly; hold the loading state briefly so a reload visibly happens.
     await new Promise(resolve => setTimeout(resolve, Math.max(0, MIN_LOADING_MS - (Date.now() - started))))
     if (!data?.players?.length) {
@@ -766,6 +799,7 @@ async function loadByMatchId(mid) {
       ...data,
       matchId: data.id,
       source,
+      sourceReason: reason ?? null,
       isParsed: isParsedMatch(data),
       laneOutcomes: {
         top: data.topLaneOutcome,
@@ -929,6 +963,27 @@ watch(
     </div>
 
     <template v-if="match">
+      <!-- Parsed, but by OpenDota standing in for Stratz: say why, and what that leaves out. -->
+      <div v-if="match.isParsed && match.source === 'opendota'" class="parse-banner source-banner" role="status">
+        <svg class="parse-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <circle cx="12" cy="7.5" r="1.2" fill="currentColor" />
+        </svg>
+        <div class="parse-text">
+          <strong>Showing OpenDota's data for this match</strong>
+          <span>
+            {{
+              match.sourceReason === 'unavailable' ? 'Stratz couldn’t be reached, so this match was loaded from OpenDota instead.'
+              : match.sourceReason === 'slow' ? 'Stratz was slow to respond, so this match was loaded from OpenDota instead.'
+              : 'Stratz hasn’t parsed this match yet, so it was loaded from OpenDota instead.'
+            }}
+            Lane results and win probability aren't available, laning charts are per minute rather than per second,
+            and some 10-minute figures (levels, assists) are estimated or missing. Reload later for Stratz's full data.
+          </span>
+        </div>
+      </div>
+
       <div v-if="!match.isParsed" class="parse-banner" role="status">
         <svg class="parse-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
@@ -1105,7 +1160,7 @@ watch(
         </div>
 
         <div class="summary-body">
-          <div v-if="teamSeries.length" class="summary-chart">
+          <div v-if="teamAvailable.length" class="summary-chart">
             <!-- Toggles rather than tabs: pick several to overlay them. A divider separates hero-by-hero
                  measures from team ones, which can't be shown together. -->
             <div class="chips" role="group" aria-label="Team chart measures">
@@ -1523,6 +1578,9 @@ watch(
   background: rgba(232,168,56,.08);
 }
 .parse-icon { flex-shrink: 0; margin-top: 0.1rem; color: #e8a838; }
+/* Informational rather than a warning: blue instead of amber. */
+.source-banner { border-color: rgba(52,191,255,.3); background: rgba(52,191,255,.06); }
+.source-banner .parse-icon { color: #34bfff; }
 .parse-text {
   flex: 1 1 18rem;
   display: flex;
