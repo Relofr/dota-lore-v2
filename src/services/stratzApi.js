@@ -243,6 +243,43 @@ export async function fetchAssistEvents(matchId) {
   return Object.fromEntries(players.map(p => [p.playerSlot, p.stats.assistEvents]))
 }
 
+const inventoryCache = cache(20)
+const INVENTORY_SLOTS = [
+  ...[0, 1, 2, 3, 4, 5].map(i => ['item' + i, 'slot']),
+  ...[0, 1, 2].map(i => ['backPack' + i, 'backpack']),
+  ['neutral0', 'neutral'],
+]
+
+// Each player's inventory at a given minute: { [playerSlot]: [{ id, kind, count }] }, count being the
+// charges (e.g. 3 tangos). Stratz's inventoryReport holds one snapshot per minute (index = minute + 1, the
+// first being before the horn); the whole report is large, so only the one minute is kept. Null when
+// Stratz has no report for the match.
+export function fetchInventoryAt(matchId, minute) {
+  const key = `${matchId}@${minute}`
+  return inventoryCache(key, () => storedOrFetched('inventory', key, () => loadInventoryAt(matchId, minute), r => r != null))
+}
+
+async function loadInventoryAt(matchId, minute) {
+  const data = await stratzQuery(`{
+    match(id: ${matchId}) {
+      players {
+        playerSlot
+        stats { inventoryReport { ${INVENTORY_SLOTS.map(([sl]) => `${sl} { itemId charges }`).join(' ')} } }
+      }
+    }
+  }`)
+  const players = data.match?.players ?? []
+  if (!players.length || players.some(p => !p.stats?.inventoryReport?.length)) return null
+  return Object.fromEntries(players.map(p => {
+    const report = p.stats.inventoryReport
+    const snap = report[Math.min(minute + 1, report.length - 1)]
+    const items = INVENTORY_SLOTS
+      .map(([sl, kind]) => snap?.[sl]?.itemId ? { id: snap[sl].itemId, kind, count: snap[sl].charges > 1 ? snap[sl].charges : undefined } : null)
+      .filter(Boolean)
+    return [p.playerSlot, items]
+  }))
+}
+
 const AEGIS = 117
 const aegisCache = cache(20)
 

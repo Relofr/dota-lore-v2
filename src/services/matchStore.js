@@ -8,7 +8,7 @@ const DB_NAME = 'dota-lore'
 // v4: rune pickups and tower damage on the match query.
 const DB_VERSION = 4
 // Most entries kept per kind; the least recently used go first.
-const LIMITS = { match: 100, playback: 25, aegis: 100, odmatch: 100 }
+const LIMITS = { match: 100, playback: 25, aegis: 100, odmatch: 100, inventory: 100 }
 
 let dbPromise = null
 

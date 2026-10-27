@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, useId } from 'vue'
 import { compact, formatTime, heroImage } from '@/utils/matchAnalysis.js'
 import HeroIcon from './HeroIcon.vue'
+import LineKey from './LineKey.vue'
 
 const props = defineProps({
   // [{ key, label, short, kind: 'lead' | 'probability' | 'perHero', values, step, color }]. Leads are Radiant
@@ -51,20 +52,32 @@ const hover = ref(null)
 let observer
 let bodyObserver
 
+// Expanded: the chart (with its controls) is laid over the page to fill the browser window, and fills it
+// like fill mode. Esc or the button puts it back; the page doesn't scroll meanwhile.
+const expanded = ref(false)
+function setExpanded(on) {
+  expanded.value = on
+  document.documentElement.style.overflow = on ? 'hidden' : ''
+}
+const onExpandedKey = e => { if (e.key === 'Escape' && expanded.value) setExpanded(false) }
+const filling = computed(() => props.fill || expanded.value)
+
 onMounted(() => {
   observer = new ResizeObserver(([entry]) => { width.value = Math.max(240, entry.contentRect.width) })
   observer.observe(root.value)
-  if (props.fill) {
-    bodyObserver = new ResizeObserver(([entry]) => { bodyHeight.value = entry.contentRect.height })
-    bodyObserver.observe(body.value)
-  }
+  // Always watched, as expanding can make any chart fill.
+  bodyObserver = new ResizeObserver(([entry]) => { bodyHeight.value = entry.contentRect.height })
+  bodyObserver.observe(body.value)
+  window.addEventListener('keydown', onExpandedKey)
 })
 onBeforeUnmount(() => {
   observer?.disconnect()
   bodyObserver?.disconnect()
+  window.removeEventListener('keydown', onExpandedKey)
+  if (expanded.value) setExpanded(false)
 })
 
-const h = computed(() => (props.fill ? Math.max(props.height, Math.floor(bodyHeight.value)) : props.height))
+const h = computed(() => (filling.value ? Math.max(props.height, Math.floor(bodyHeight.value)) : props.height))
 // Heroes switched off with the toggles under a per-hero chart, by hero key.
 const hiddenHeroes = ref(new Set())
 
@@ -79,25 +92,25 @@ const toggleHeroes = computed(() => {
 })
 
 // Per-hero lines are coloured by hero (their in-game player colour), so overlaid measures are told apart
-// by line style instead, in this order: solid, dashed, dotted. `border` is the matching CSS border style
-// for keys drawn with borders.
+// by line style instead, in this order: solid, dashed, dotted. Keys are drawn with LineKey, the same way.
+// Win probability's own pattern (dash-dot), distinct from every measure's.
+const PROB_DASH = '9 3 1 3'
+
 const LINE_STYLES = [
-  { dash: null, border: 'solid' },
-  { dash: '7 4', border: 'dashed' },
-  { dash: '1 4', border: 'dotted' },
+  { dash: null },
+  { dash: '7 4' },
+  { dash: '1 4' },
 ]
 function lineStyle(seriesKey) {
   const i = props.series.filter(s => s.kind === 'perHero').findIndex(s => s.key === seriesKey)
   return LINE_STYLES[Math.max(0, i) % LINE_STYLES.length]
 }
 
-// A hero's line key under its toggle: one segment per per-hero measure shown, in the hero's colour and
-// each measure's line style.
-function heroKeySegments(t) {
-  const perHero = props.series.filter(s => s.kind === 'perHero')
-  // No per-hero lines (a team lead chart): the hero counts towards their team's line, so the team colour.
-  if (!perHero.length) return [{ key: 'team', color: t.isRadiant ? RADIANT : DIRE, border: 'solid' }]
-  return perHero.map(s => ({ key: s.key, color: t.color, border: lineStyle(s.key).border }))
+// The colour bar under a hero's toggle: their line colour. Measures' line styles are in the legend, so the
+// bar stays solid. With no per-hero lines (a team lead chart) the hero counts towards their team's line,
+// so it's the team colour.
+function heroKeyColor(t) {
+  return props.series.some(s => s.kind === 'perHero') ? t.color : (t.isRadiant ? RADIANT : DIRE)
 }
 
 // Hides or shows a hero's lines.
@@ -155,7 +168,8 @@ const plotW = computed(() => width.value - PAD.l - padR.value)
 const plotH = computed(() => h.value - PAD.t - PAD.b)
 const single = computed(() => props.series.length === 1)
 // Plain line chart (values from zero up) rather than one split into Radiant and Dire halves.
-const normal = computed(() => props.series.length > 0 && props.series.every(s => s.kind === 'perHero'))
+// Any per-hero series makes it a plain chart; a probability shown with them runs 0% to 100% bottom to top.
+const normal = computed(() => props.series.some(s => s.kind === 'perHero') && props.series.every(s => s.kind === 'perHero' || s.kind === 'probability'))
 
 function niceStep(range, count) {
   const raw = range / count
@@ -172,7 +186,8 @@ const allValues = s => (s.kind === 'perHero' ? s.heroes.flatMap(hr => hr.values)
 const pointCount = s => (s.kind === 'perHero' ? Math.max(0, ...s.heroes.map(hr => hr.values.length)) : s.values.length)
 
 const scaled = computed(() => shown.value.map(s => {
-  if (s.kind === 'probability') return { ...s, norm: v => (v - 0.5) * 2 }
+  // Radiant's chance: 50% on the zero line of a split chart, or 0–100% bottom to top of a plain one.
+  if (s.kind === 'probability') return { ...s, norm: v => (normal.value ? v : (v - 0.5) * 2) }
   const peak = Math.max(s.minPeak ?? 200, ...allValues(s).map(Math.abs))
   const unit = niceStep(peak, 3)
   const scale = single.value ? Math.ceil(peak / unit) * unit : peak
@@ -225,7 +240,6 @@ const heroTracks = computed(() => perHeroSeries.value.flatMap(s => {
       side,
       sign,
       dash: lineStyle(s.key).dash,
-      border: lineStyle(s.key).border,
       color: heroColor(hr),
       d: path(s, hr.values, sign),
       endX: x(last * s.step),
@@ -338,13 +352,24 @@ function onKey(e) {
   hover.value = snap(start + (e.key === 'ArrowRight' ? by : -by))
 }
 
-// Markers in the visible time range. One that would overlap the previous marker on its edge is nudged
+// Objective types switched off with their toggles (e.g. 'roshan').
+const hiddenEvents = ref(new Set())
+function toggleEventType(type) {
+  const next = new Set(hiddenEvents.value)
+  if (next.has(type)) next.delete(type)
+  else next.add(type)
+  hiddenEvents.value = next
+}
+
+const eventsInRange = computed(() => props.events.filter(e => e.time >= 0 && e.time <= duration.value))
+
+// Shown markers in the visible time range. One that would overlap the previous marker on its edge is nudged
 // right so both stay readable.
 const markers = computed(() => {
   // Right edge of the last marker placed on each side.
   const lastRight = { radiant: -Infinity, dire: -Infinity }
-  return props.events
-    .filter(e => e.time >= 0 && e.time <= duration.value)
+  return eventsInRange.value
+    .filter(e => !hiddenEvents.value.has(e.type))
     .map(e => {
       const t = EVENT_TYPES[e.type]
       const cx = Math.max(x(e.time), lastRight[e.side] + t.w / 2 + 1)
@@ -353,8 +378,9 @@ const markers = computed(() => {
       return { ...e, cx, cy, ...t }
     })
 })
+// The objective types this chart has, shown or not: for the legend and the toggles.
 const eventTypesShown = computed(() => Object.entries(EVENT_TYPES)
-  .filter(([type]) => markers.value.some(m => m.type === type))
+  .filter(([type]) => eventsInRange.value.some(e => e.type === type))
   .map(([type, t]) => ({ type, ...t })))
 
 // Events within half a minute of the hovered time, for the tooltip.
@@ -419,7 +445,32 @@ const summary = computed(() => shown.value
 </script>
 
 <template>
-  <div ref="root" class="advantage-chart" :class="{ fill }">
+  <!-- While expanded, the chart moves to <body> so it sits above everything (inside the page it would be
+       trapped under the sticky header by its container's stacking). The host leaves layout to the chart. -->
+  <div class="chart-host">
+  <Teleport to="body" :disabled="!expanded">
+  <div ref="root" class="advantage-chart" :class="{ fill: filling, 'chart-expanded': expanded }">
+    <!-- The page's controls for this chart (measure chips), with the expand button on the far right. -->
+    <div class="chart-controls">
+      <div class="chart-controls-slot"><slot name="controls" /></div>
+      <button
+        type="button"
+        class="fullscreen-btn"
+        :title="expanded ? 'Shrink (Esc)' : 'Expand to the window'"
+        :aria-label="expanded ? 'Shrink chart' : 'Expand chart to fill the window'"
+        :aria-pressed="expanded"
+        @click="setExpanded(!expanded)"
+      >
+        <svg v-if="!expanded" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+          <!-- Expand: arrows pointing out to opposite corners. -->
+          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+          <!-- Minimize: arrows pointing in from opposite corners. -->
+          <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+    </div>
     <div class="chart-head">
       <span class="chart-title">
         {{ heading }}
@@ -429,7 +480,8 @@ const summary = computed(() => shown.value
         <template v-if="normal">
           <template v-if="!single">
             <span v-for="s in series" :key="s.key" class="key">
-              <i class="key-line key-neutral" :style="{ borderTopStyle: lineStyle(s.key).border }" />{{ s.label }}
+              <LineKey v-if="s.kind === 'probability'" :dash="PROB_DASH" :color="s.color" />
+              <LineKey v-else :dash="lineStyle(s.key).dash" color="var(--color-text)" />{{ s.label }}
             </span>
           </template>
         </template>
@@ -439,7 +491,7 @@ const summary = computed(() => shown.value
         </template>
         <template v-else>
           <span v-for="s in series" :key="s.key" class="key">
-            <i class="key-line" :class="{ dashed: s.kind === 'probability' }" :style="{ color: s.color }" />{{ s.label }}
+            <LineKey :dash="s.kind === 'probability' ? PROB_DASH : null" :color="s.color" />{{ s.label }}
           </span>
         </template>
         <span v-for="t in eventTypesShown" :key="t.type" class="key">
@@ -447,7 +499,7 @@ const summary = computed(() => shown.value
         </span>
       </span>
     </div>
-    <div ref="body" class="chart-body" :style="fill ? { minHeight: `${height}px` } : null">
+    <div ref="body" class="chart-body" :style="filling ? { minHeight: `${height}px` } : null">
       <div v-if="emptyHint" class="empty-hint">{{ emptyHint }}</div>
       <svg
         :width="width"
@@ -503,7 +555,7 @@ const summary = computed(() => shown.value
             :d="l.d"
             class="line"
             :stroke="l.color"
-            :stroke-dasharray="l.kind === 'probability' ? '5 4' : null"
+            :stroke-dasharray="l.kind === 'probability' ? PROB_DASH : null"
           />
         </template>
         <!-- Per-hero lines, labelled by the hero's icon where each ends. -->
@@ -575,7 +627,7 @@ const summary = computed(() => shown.value
           <span>{{ m.label }} · {{ formatTime(m.time) }}</span>
         </div>
         <div v-for="r in hoverRows" :key="r.s.key" class="tt-row">
-          <i :class="{ dashed: !single && r.s.kind === 'probability' }" :style="{ color: single ? sideColor(r.s, r.v) : r.s.color }" />
+          <LineKey :width="16" :dash="!single && r.s.kind === 'probability' ? PROB_DASH : null" :color="single ? sideColor(r.s, r.v) : r.s.color" />
           <strong>{{ display(r.s, r.v) }}</strong>
           <span>{{ r.s.label }} · {{ sideShort(r.s, r.v) }}</span>
           <small v-if="r.s.detail" class="tt-detail">{{ r.s.detail(hover) }}</small>
@@ -585,7 +637,7 @@ const summary = computed(() => shown.value
         <div v-if="heroSections.length" class="tt-table" :style="{ '--cols': perHeroSeries.length }">
           <span />
           <span v-for="s in perHeroSeries" :key="s.key" class="tt-col">
-            <i v-if="!single" class="key-neutral" :style="{ borderTopStyle: lineStyle(s.key).border }" />{{ s.short ?? s.label }}
+            <LineKey v-if="!single" :width="16" :dash="lineStyle(s.key).dash" color="var(--color-text)" />{{ s.short ?? s.label }}
           </span>
           <template v-for="sec in heroSections" :key="sec.key">
             <span class="tt-side tt-sep tt-sum" :class="[`tt-side-${sec.key}`, `tt-sum-${sec.key}`]">{{ sec.label }}</span>
@@ -604,7 +656,7 @@ const summary = computed(() => shown.value
 
     <!-- Per-hero charts: per side, a toggle for the whole side and one for each hero, to show or hide lines.
          The side emblems sit on the outside (Radiant left, Dire right) with a dot between the teams. -->
-    <div v-if="toggleHeroes.length" class="hero-toggles" role="group" aria-label="Heroes shown">
+    <div v-if="toggleHeroes.length || eventTypesShown.length" class="hero-toggles" role="group" aria-label="Heroes and objectives shown">
       <template v-for="(side, si) in toggleSides" :key="side.key">
       <span v-if="si > 0" class="team-dot" aria-hidden="true" />
       <div class="toggle-side" :class="`side-${side.key}`">
@@ -630,19 +682,63 @@ const summary = computed(() => shown.value
           @click="toggleHero(t.key)"
         >
           <HeroIcon :hero="t.hero" class="hero-toggle-icon" />
-          <!-- This hero's line key: their colour, one segment per measure in that measure's line style. -->
+          <!-- This hero's line colour. -->
           <span class="hero-key-line" aria-hidden="true">
-            <i v-for="seg in heroKeySegments(t)" :key="seg.key" :style="{ color: seg.color, borderTopStyle: seg.border }" />
+            <i :style="{ color: heroKeyColor(t) }" />
           </span>
         </button>
       </div>
       </template>
+      <!-- Objectives (Roshan, wisdom runes): show or hide their markers. -->
+      <template v-if="eventTypesShown.length">
+        <span v-if="toggleSides.length" class="team-dot" aria-hidden="true" />
+        <div class="toggle-side">
+          <button
+            v-for="t in eventTypesShown"
+            :key="t.type"
+            type="button"
+            class="hero-toggle event-toggle"
+            :class="{ off: hiddenEvents.has(t.type) }"
+            :aria-pressed="!hiddenEvents.has(t.type)"
+            :title="`${hiddenEvents.has(t.type) ? 'Show' : 'Hide'} ${t.label} markers`"
+            @click="toggleEventType(t.type)"
+          >
+            <img :src="t.icon" :alt="t.label" class="event-toggle-icon" />
+          </button>
+        </div>
+      </template>
     </div>
+  </div>
+  </Teleport>
   </div>
 </template>
 
 <style scoped>
+.chart-host { display: contents; }
 .advantage-chart { position: relative; min-width: 0; }
+.fullscreen-btn {
+  display: inline-flex;
+  padding: 0.2rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--color-muted, #7a8799);
+  cursor: pointer;
+}
+.fullscreen-btn:hover { color: var(--color-text); background: rgba(255,255,255,.06); }
+.fullscreen-btn:focus-visible { outline: 2px solid #34bfff; outline-offset: 1px; }
+/* Expanded: over the page (above the sticky header and sidebar), filling the window. */
+.advantage-chart.chart-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  height: auto;
+  padding: 1.5rem 2rem;
+  background: var(--color-bg, #0d0f12);
+}
+.chart-controls { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+.chart-controls-slot { flex: 1; min-width: 0; }
+.chart-controls-slot :deep(.chips) { margin-bottom: 0; }
 
 .chart-head {
   display: flex;
@@ -672,17 +768,6 @@ const summary = computed(() => shown.value
   height: 8px;
   border-radius: 2px;
 }
-/* Line keys draw in currentColor so the dashed one can be a border. */
-.key i.key-line,
-.tt-row i {
-  display: inline-block;
-  width: 12px;
-  height: 0;
-  border-radius: 0;
-  border-top: 2px solid currentColor;
-}
-.key i.dashed,
-.tt-row i.dashed { border-top-style: dashed; }
 
 .chart-body { position: relative; }
 .empty-hint {
@@ -757,6 +842,9 @@ const summary = computed(() => shown.value
 .hero-toggle.off { opacity: 0.35; filter: grayscale(1); border-bottom-color: var(--color-border, #2e3542); }
 .hero-toggle:hover { opacity: 1; }
 .hero-toggle:focus-visible { outline: 2px solid #34bfff; outline-offset: 1px; }
+/* Objective toggles: the marker icon, centred in a hero-sized button. */
+.hero-toggles .event-toggle { border-bottom-color: transparent; justify-content: center; align-items: center; width: 30px; height: 34px; }
+.hero-toggle.event-toggle .event-toggle-icon { display: block; width: 20px; height: 20px; border-radius: 0; object-fit: contain; }
 .hero-toggle :deep(img), .hero-toggle-icon { display: block; width: 26px; height: 26px; border-radius: 3px; object-fit: cover; }
 
 .tooltip {
@@ -791,9 +879,6 @@ const summary = computed(() => shown.value
 /* Supporting numbers beside a value, e.g. last hits/denies next to net worth. */
 .tt-detail { margin-left: 0.3rem; font-size: var(--fs-sm); font-weight: 500; color: var(--color-muted, #7a8799); }
 .tt-col { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.25rem; font-size: var(--fs-xs); color: var(--color-muted, #7a8799); }
-.tt-col i { display: inline-block; width: 12px; border-top: 2px solid currentColor; }
-/* Line-style keys that stand for a measure rather than a colour. */
-.key-neutral { color: var(--color-text); }
 /* The objective icons again, in the legend and tooltip. */
 .key-icon { display: block; height: 14px; width: auto; }
 .tt-event {

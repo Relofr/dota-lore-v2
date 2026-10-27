@@ -10,7 +10,7 @@ const props = defineProps({
   active: { type: Boolean, default: false },
   // compareRow entries (laneBreakdown's or laneTotals') for whichever point in the game is being shown.
   rows: { type: Array, default: () => [] },
-  // Heading over the stats, e.g. "At 10:00" or "End of Game".
+  // Heading over the stats, e.g. "At 10:00" or "Full Match".
   statsLabel: { type: String, required: true },
 })
 defineEmits(['select'])

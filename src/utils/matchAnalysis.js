@@ -392,7 +392,7 @@ export function objectiveEvents(match, aegisPickups = []) {
   return events.sort((a, b) => a.time - b.time)
 }
 
-// The lane's end-of-game totals, in the same row shape as the breakdown's, for the sidebar's full-game view.
+// The lane's end-of-game totals, in the same row shape as the breakdown's, for the sidebar's full-match view.
 export function laneTotals(group) {
   if (!group.radiant.length || !group.dire.length) return []
   const total = (players, key) => players.reduce((sum, p) => sum + (p.thisMatch?.[key] ?? 0), 0)
@@ -446,7 +446,7 @@ const TOP_PERFORMERS = [
   { key: 'heroDamage', label: 'Most hero damage', format: compact },
 ]
 
-// The best player for each stat, by the laning cutoff or over the whole game.
+// The best player for each stat, by the laning cutoff or over the full match.
 function topPerformers(players, minute) {
   const value = (p, key) => (minute == null ? p.thisMatch?.[key] : statsAt(p.thisMatch, minute)?.[key]) ?? 0
   const facts = []

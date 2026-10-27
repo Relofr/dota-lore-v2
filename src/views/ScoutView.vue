@@ -7,6 +7,7 @@ import {
   fetchMatchPlayback,
   fetchAegisPickups,
   fetchAssistEvents,
+  fetchInventoryAt,
   fetchPlayerMatches,
   fetchRankedPeriodPage,
   fetchItems,
@@ -126,6 +127,19 @@ async function loadAssists(matchId) {
   }
 }
 
+// Each player's inventory at the end of laning ({ [playerSlot]: items }), from Stratz's per-minute
+// inventory snapshots. Null until loaded, or for OpenDota matches, which fall back to purchases.
+const laneInventory = ref(null)
+
+async function loadInventory(matchId) {
+  try {
+    const inv = await fetchInventoryAt(matchId, LANE_MINUTE)
+    if (match.value?.matchId === matchId) laneInventory.value = inv
+  } catch (err) {
+    console.error('[Scout] inventory:', err.message)
+  }
+}
+
 // Roshan kills and wisdom runes, marked on the summary chart.
 const objectives = computed(() => objectiveEvents(match.value, aegisPickups.value))
 
@@ -221,7 +235,7 @@ function watchSections() {
 
 // The URL is /scout/<view>/<lane>/<matchId>, e.g. /scout/laning/mid/8812345678, so a view and section can
 // be linked to. The summary, at the top, has no lane part.
-const VIEW_SLUGS = { laning: 'laning', full: 'full-game' }
+const VIEW_SLUGS = { laning: 'laning', full: 'full-match' }
 const SECTION_SLUGS = { 'lane-top': 'top', 'lane-mid': 'mid', 'lane-bottom': 'bottom', 'lane-other': 'roaming' }
 const SLUG_SECTIONS = Object.fromEntries(Object.entries(SECTION_SLUGS).map(([id, slug]) => [slug, id]))
 
@@ -264,14 +278,20 @@ onBeforeUnmount(() => sectionObserver?.disconnect())
 
 // Line colours for when measures are overlaid: a validated set (all pairs, dark surface #1a1f2b) that
 // stays clear of the Radiant green and Dire red. Win probability is dashed in a neutral, as it isn't a lead.
-// `label` titles the chart when a measure is shown alone; `short` heads its column in the tooltip.
-// `split` measures are team-level, drawn Radiant above and Dire below the zero line; the others are drawn
-// hero by hero as plain lines. The two kinds can't share a chart, so picking one clears the other.
-const TEAM_METRICS = [
+// The per-hero measures, shared by the summary and lane charts: each hero's running total as a line in
+// their player colour (experience as their level). `label` titles the chart when a measure is shown alone;
+// `short` heads its column in the tooltip.
+const HERO_METRICS = [
   { key: 'heroDamage', tab: 'Hero Damage', label: 'Hero Damage', short: 'Damage', color: '#d55181' },
-  { key: 'winProbability', tab: 'Win Probability', label: 'Win Probability', color: '#c3c8d2', kind: 'probability', split: true },
-  { key: 'networth', tab: 'Net Worth', label: 'Team Net Worth', short: 'Net Worth', color: '#c98500', split: true },
-  { key: 'experience', tab: 'Experience', label: 'Team Experience', short: 'XP', color: '#3987e5', split: true },
+  { key: 'networth', tab: 'Net Worth', label: 'Net Worth', short: 'Net Worth', color: '#c98500' },
+  { key: 'experience', tab: 'Level', label: 'Level', short: 'Level', color: '#3987e5' },
+]
+
+// The summary chart has the same measures plus win probability, Radiant's chance as one dashed line. It can
+// be overlaid on the per-hero lines; on its own it gets a chart split at 50% (Radiant above, Dire below).
+const TEAM_METRICS = [
+  ...HERO_METRICS,
+  { key: 'winProbability', tab: 'Win Probability', label: 'Win Probability', color: '#c3c8d2', kind: 'probability' },
 ]
 
 // A measure drawn hero by hero: each one's running total as a plain line. Experience also marks each
@@ -294,12 +314,12 @@ function levelAt(times, t) {
   return i + 1 + (t - times[i]) / (next - times[i])
 }
 
-// Experience is drawn as each hero's level (unless `levels` is false, for the team XP lead).
-function heroSeries(m, leads, { levels = true } = {}) {
-  const asLevels = levels && m.key === 'experience'
+// Experience is drawn as each hero's level.
+function heroSeries(m, leads) {
+  const asLevels = m.key === 'experience'
   return {
     ...m,
-    ...(asLevels ? { label: 'Level', short: 'Level', minPeak: 5, format: v => String(Math.floor(v)) } : {}),
+    ...(asLevels ? { minPeak: 5, format: v => String(Math.floor(v)) } : {}),
     kind: 'perHero',
     step: leads.step,
     heroes: leads.heroes.map(h => ({
@@ -328,36 +348,19 @@ function csAt(h, step, t) {
 }
 const csText = ({ lh, dn }) => `${lh}/${dn}`
 
-// Each side's combined last hits/denies, for beside the team net worth lead.
-function teamCsText(leads, t) {
-  const side = isRadiant => leads.heroes
-    .filter(h => h.player.isRadiant === isRadiant)
-    .map(h => csAt(h, leads.step, t))
-    .reduce((a, b) => ({ lh: a.lh + b.lh, dn: a.dn + b.dn }), { lh: 0, dn: 0 })
-  return `CS ${csText(side(true))} vs ${csText(side(false))}`
-}
+
 
 const teamLeads = computed(() =>
   leadSeries(players.value.filter(p => p.isRadiant), players.value.filter(p => !p.isRadiant), fine.value))
 
-// Team measures are Radiant-minus-Dire lines (win probability as Radiant's chance); hero damage is hero by hero.
+// Win probability is Radiant's chance as one line; everything else is hero by hero, as in the lanes
+// (per-second in the laning view once playback is in).
 function teamMetricSeries(tm) {
-  const m = match.value
   if (tm.key === 'winProbability') {
-    return m.winRates?.length ? { ...tm, values: windowed(m.winRates), step: 60 } : null
+    const rates = match.value.winRates
+    return rates?.length ? { ...tm, values: windowed(rates), step: 60 } : null
   }
-  if (!tm.split) return teamLeads.value ? heroSeries(tm, teamLeads.value) : null
-  const leads = teamLeads.value
-  const lead = { ...tm, kind: 'lead', detail: tm.key === 'networth' && leads ? t => teamCsText(leads, t) : null }
-  // Built from each hero's own series, so the chart's hero toggles can choose who counts towards each
-  // team's line (per-second in the laning view once playback is in).
-  if (leads) {
-    const { heroes, step } = heroSeries(tm, leads, { levels: false })
-    return { ...lead, heroes: heroes.map(({ dots, detail, ...hr }) => hr), step }
-  }
-  // No per-player timelines: Stratz's own per-minute team leads, without hero selection.
-  const source = tm.key === 'networth' ? m.radiantNetworthLeads : m.radiantExperienceLeads
-  return source?.length ? { ...lead, values: windowed(source), step: 60 } : null
+  return teamLeads.value ? heroSeries(tm, teamLeads.value) : null
 }
 
 // Every measure this match has data for, so a chip only shows when it can draw something.
@@ -381,11 +384,8 @@ function toggled(shown, key) {
   return shown.includes(key) ? shown.filter(k => k !== key) : [...shown, key]
 }
 
-// Picking a measure of the other kind (team vs hero by hero) starts the chart over with just that one.
 function toggleTeamMetric(key) {
-  const shown = teamSeries.value.map(s => s.key)
-  const isSplit = k => !!TEAM_METRICS.find(tm => tm.key === k)?.split
-  teamMetrics.value = shown.length && isSplit(shown[0]) !== isSplit(key) ? [key] : toggled(shown, key)
+  teamMetrics.value = toggled(teamSeries.value.map(s => s.key), key)
 }
 
 const teamKills = computed(() => {
@@ -406,10 +406,7 @@ function windowed(values, step = 60) {
 }
 
 // Same measures, order and colours as the summary chart, minus win probability; all hero by hero here.
-// Experience is shown as hero levels here, so its chip reads "Level".
-const LANE_METRICS = TEAM_METRICS
-  .filter(tm => tm.kind !== 'probability')
-  .map(({ split, ...tm }) => ({ ...tm, label: tm.label.replace('Team ', ''), ...(tm.key === 'experience' ? { tab: 'Level' } : {}) }))
+const LANE_METRICS = HERO_METRICS
 
 // The breakdown goes beside the chart when it has no matchup tables to fill a full-width row.
 function breakdownBesideChart(group) {
@@ -426,7 +423,7 @@ function toggleLaneMetric(group, key) {
 }
 
 
-// This player's stats as rows, @10 and end of game side by side, for the vertical table on each card.
+// This player's stats as rows, @10 and full match side by side, for the vertical table on each card.
 function matchStatRows(p) {
   const m = p.thisMatch
   const at = statsAt(m)
@@ -453,17 +450,44 @@ function positionText(p) {
   return n ? `Pos ${n} · ${POSITION_LABELS[pos]}` : null
 }
 
-function laneItems(p) {
-  const purchases = p.thisMatch?.stats?.itemPurchases ?? []
+// Consumables bought for the team, and regen, each listed in their own row (matched by item shortName).
+const SUPPORT_ITEMS = ['ward_observer', 'ward_sentry', 'ward_dispenser', 'smoke_of_deceit', 'dust']
+const REGEN_ITEMS = ['tango', 'clarity', 'flask', 'enchanted_mango', 'faerie_fire']
+const isItem = names => id => names.includes(itemMap.value.get(id)?.shortName)
+const isRecipe = id => !!itemMap.value.get(id)?.stat?.isRecipe
+
+// Purchases from `from` to `to` seconds (inclusive), grouped by item with a count; `keep` picks which.
+function purchasesBetween(p, from, to, keep) {
   const grouped = new Map()
-  for (const buy of purchases) {
-    if (buy.time > LANE_MINUTE * 60) continue
-    if (itemMap.value.get(buy.itemId)?.stat?.isRecipe) continue
+  for (const buy of p.thisMatch?.stats?.itemPurchases ?? []) {
+    if (buy.time < from || buy.time > to || !keep(buy.itemId)) continue
     const seen = grouped.get(buy.itemId)
     if (seen) seen.count++
     else grouped.set(buy.itemId, { id: buy.itemId, time: buy.time, count: 1 })
   }
   return [...grouped.values()]
+}
+
+const LANE_END = LANE_MINUTE * 60
+
+// The laning view's item rows, each shown only if it has anything: what they started with (bought before
+// the horn), support items and regen bought during the lane, and what they carried at the end of laning.
+// The last is Stratz's inventory snapshot (finished items, not components); without one (OpenDota matches,
+// or before it loads) it falls back to the other items bought during the lane.
+function laneItemSections(p) {
+  const snapshot = laneInventory.value?.[p.thisMatch?.playerSlot]
+  return [
+    { key: 'start', label: 'Starting items', items: purchasesBetween(p, -Infinity, 0, id => !isRecipe(id)) },
+    { key: 'support', label: `Support items · 0–${LANE_MINUTE}:00`, items: purchasesBetween(p, 1, LANE_END, isItem(SUPPORT_ITEMS)) },
+    { key: 'regen', label: `Regen · 0–${LANE_MINUTE}:00`, items: purchasesBetween(p, 1, LANE_END, isItem(REGEN_ITEMS)) },
+    snapshot
+      ? { key: 'inventory', label: `Inventory at ${LANE_MINUTE}:00`, items: snapshot }
+      : {
+          key: 'inventory',
+          label: `Items bought · 0–${LANE_MINUTE}:00`,
+          items: purchasesBetween(p, 1, LANE_END, id => !isRecipe(id) && !isItem(SUPPORT_ITEMS)(id) && !isItem(REGEN_ITEMS)(id)),
+        },
+  ].filter(sec => sec.items.length)
 }
 
 function finalItems(p) {
@@ -476,8 +500,15 @@ function finalItems(p) {
   ]
 }
 
-function playerItems(p) {
-  return view.value === 'laning' ? laneItems(p) : finalItems(p)
+// The item rows for the current view: the laning breakdown, or the final inventory with the support items
+// and regen bought over the full match.
+function itemSections(p) {
+  if (view.value === 'laning') return laneItemSections(p)
+  return [
+    { key: 'final', label: 'Final items', items: finalItems(p) },
+    { key: 'support', label: 'Support items · Full Match', items: purchasesBetween(p, 1, Infinity, isItem(SUPPORT_ITEMS)) },
+    { key: 'regen', label: 'Regen · Full Match', items: purchasesBetween(p, 1, Infinity, isItem(REGEN_ITEMS)) },
+  ].filter(sec => sec.items.length)
 }
 
 function toggleHistory(p) {
@@ -531,20 +562,6 @@ function isPrivate(p) {
   if (!p.accountId) return true
   const data = playerData.value[p.accountId]
   return data?.steamAccount?.isAnonymous === true || !data?.anyMatch?.length
-}
-
-function overallRecord(p) {
-  const games = playerData.value[p.accountId]?.recentPeriod
-  if (!games?.length) return null
-  let wins = 0
-  for (const m of games) {
-    if (m.players?.[0] && m.players[0].isRadiant === m.didRadiantWin) wins++
-  }
-  return {
-    rate: Math.round((wins / games.length) * 100),
-    wins,
-    losses: games.length - wins,
-  }
 }
 
 // Avatar URLs that failed to load; those players get the user icon instead.
@@ -703,6 +720,7 @@ function resetState() {
   historyOpen.value = {}
   playback.value = null
   aegisPickups.value = []
+  laneInventory.value = null
   error.value = null
 }
 
@@ -721,7 +739,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => searchObserver?.disconnect())
 
-// Keyboard shortcuts for a loaded, parsed match: 1 = laning view, 2 = full game. Ignored while typing
+// Keyboard shortcuts for a loaded, parsed match: 1 = laning view, 2 = full match. Ignored while typing
 // in a field or with a modifier held, so they never clash with text entry or browser shortcuts.
 const VIEW_KEYS = { 1: 'laning', 2: 'full' }
 function onHotkey(e) {
@@ -826,6 +844,7 @@ async function loadByMatchId(mid) {
       } else {
         loadPlayback(data.id)
         loadAegis(data.id)
+        loadInventory(data.id)
       }
     }
   } catch (err) {
@@ -847,7 +866,8 @@ watch(
     }
     const mid = route.params.matchId
     if (typeof mid !== 'string' || !mid) return
-    if (route.params.view) view.value = route.params.view === 'full-game' ? 'full' : 'laning'
+    // 'full-game' is the old slug for the full match.
+    if (route.params.view) view.value = ['full-match', 'full-game'].includes(route.params.view) ? 'full' : 'laning'
     pendingSection = SLUG_SECTIONS[route.params.section] ?? null
     // Same match, e.g. the URL was only tidied: nothing to reload.
     if (match.value?.matchId === Number(mid) || String(match.value?.matchId) === mid) return
@@ -1074,7 +1094,7 @@ watch(
               aria-keyshortcuts="2"
               title="Shortcut: 2"
               @click="view = 'full'"
-            >Full Game<kbd class="hotkey" aria-hidden="true">2</kbd></button>
+            >Full Match<kbd class="hotkey" aria-hidden="true">2</kbd></button>
           </div>
           </div>
 
@@ -1104,7 +1124,7 @@ watch(
               :group="group"
               :active="activeSection === `lane-${group.key}`"
               :rows="view === 'laning' ? group.breakdown?.rows ?? [] : laneTotals(group)"
-              :stats-label="view === 'laning' ? `At ${LANE_MINUTE}:00` : 'End of Game'"
+              :stats-label="view === 'laning' ? `At ${LANE_MINUTE}:00` : 'Full Match'"
               @select="scrollToLane"
             />
           </div>
@@ -1161,19 +1181,21 @@ watch(
 
         <div class="summary-body">
           <div v-if="teamAvailable.length" class="summary-chart">
-            <!-- Toggles rather than tabs: pick several to overlay them. A divider separates hero-by-hero
-                 measures from team ones, which can't be shown together. -->
-            <div class="chips" role="group" aria-label="Team chart measures">
-              <button
-                v-for="(tm, i) in teamAvailable"
-                :key="tm.key"
-                type="button"
-                :aria-pressed="teamSeries.some(s => s.key === tm.key)"
-                :class="{ active: teamSeries.some(s => s.key === tm.key), 'chip-divide': i > 0 && !!tm.split !== !!teamAvailable[i - 1].split }"
-                @click="toggleTeamMetric(tm.key)"
-              >{{ tm.tab }}</button>
-            </div>
-            <AdvantageChart :series="teamSeries" :events="objectives" title="Team Advantage" :height="170" fill />
+            <AdvantageChart :series="teamSeries" :events="objectives" title="Team Advantage" :height="170" fill>
+              <!-- Toggles rather than tabs: pick several to overlay them. -->
+              <template #controls>
+                <div class="chips" role="group" aria-label="Team chart measures">
+                  <button
+                    v-for="tm in teamAvailable"
+                    :key="tm.key"
+                    type="button"
+                    :aria-pressed="teamSeries.some(s => s.key === tm.key)"
+                    :class="{ active: teamSeries.some(s => s.key === tm.key) }"
+                    @click="toggleTeamMetric(tm.key)"
+                  >{{ tm.tab }}</button>
+                </div>
+              </template>
+            </AdvantageChart>
           </div>
           <div v-if="facts.length" class="facts-card">
             <div class="section-label">{{ view === 'laning' ? `Laning · 0–${LANE_MINUTE} min` : 'Match' }}</div>
@@ -1214,22 +1236,25 @@ watch(
         <!-- A lane with no core/support matchups (mid) has a short breakdown, so it sits beside the chart. -->
         <div class="lane-top" :class="{ 'with-breakdown': breakdownBesideChart(group) }">
         <div v-if="group.leads" class="lane-chart">
-          <div class="chips" role="group" :aria-label="`${group.label} chart measures`">
-            <button
-              v-for="m in LANE_METRICS"
-              :key="m.key"
-              type="button"
-              :aria-pressed="laneSeries(group).some(s => s.key === m.key)"
-              :class="{ active: laneSeries(group).some(s => s.key === m.key) }"
-              @click="toggleLaneMetric(group, m.key)"
-            >{{ m.tab }}</button>
-          </div>
           <AdvantageChart
             :series="laneSeries(group)"
             title="Lane Advantage"
             :height="170"
             :fill="breakdownBesideChart(group)"
-          />
+          >
+            <template #controls>
+              <div class="chips" role="group" :aria-label="`${group.label} chart measures`">
+                <button
+                  v-for="m in LANE_METRICS"
+                  :key="m.key"
+                  type="button"
+                  :aria-pressed="laneSeries(group).some(s => s.key === m.key)"
+                  :class="{ active: laneSeries(group).some(s => s.key === m.key) }"
+                  @click="toggleLaneMetric(group, m.key)"
+                >{{ m.tab }}</button>
+              </div>
+            </template>
+          </AdvantageChart>
         </div>
         <aside v-if="breakdownBesideChart(group)" class="lane-side">
           <LaneBreakdown :breakdown="group.breakdown" :outcome="group.outcome" :minute="LANE_MINUTE" />
@@ -1249,73 +1274,42 @@ watch(
               <div v-if="!p" class="player-card-spacer" />
               <div v-else class="player-card" :class="side === 0 ? 'card-radiant' : 'card-dire'">
 
-                <!-- The hero leads the card, so facing cards read as hero against hero; the player comes second. -->
-                <div v-if="p.thisMatch" class="hero-banner">
-                  <HeroIcon :hero="p.thisMatch.hero" wide class="hero-banner-icon" />
+                <!-- The hero leads the card, so facing cards read as hero against hero: hero picture, then the hero
+                     and the player who played it, then their profile links stacked on the right. -->
+                <div class="hero-banner">
+                  <HeroIcon v-if="p.thisMatch" :hero="p.thisMatch.hero" wide class="hero-banner-icon" />
                   <div class="hero-banner-text">
-                    <span class="hero-banner-name">{{ p.thisMatch.hero?.displayName ?? 'Unknown hero' }}</span>
+                    <span v-if="p.thisMatch" class="hero-banner-name">{{ p.thisMatch.hero?.displayName ?? 'Unknown hero' }}</span>
                     <span v-if="positionText(p)" class="hero-banner-pos">{{ positionText(p) }}</span>
                   </div>
-                </div>
-
-                <div class="player-header">
-                  <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" @error="onAvatarError(playerAvatar(p))" />
-                  <!-- No avatar, or it failed to load: a generic user icon. -->
-                  <div v-else class="avatar avatar-empty" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" class="avatar-icon">
-                      <circle cx="12" cy="8.5" r="4" fill="currentColor" />
-                      <path d="M4 20.5c0-4.1 3.6-7 8-7s8 2.9 8 7" fill="currentColor" />
-                    </svg>
-                  </div>
-                  <div class="player-info">
-                    <div class="name-row">
-                      <span class="name-main">
-                        <RankMedal
-                          v-if="playerData[p.accountId]?.steamAccount?.seasonRank"
-                          :rank="playerData[p.accountId].steamAccount.seasonRank"
-                          :leaderboard-rank="playerData[p.accountId].steamAccount.seasonLeaderboardRank"
-                        />
-                        <span class="player-name">{{ playerName(p) }}</span>
-                      </span>
-                      <span v-if="dataLoading[p.accountId]" class="skel skel-roles" />
-                      <template v-else-if="playerRoles(p.accountId).length">
-                        <span class="name-divider" aria-hidden="true" />
-                        <span class="role-badges">
-                          <span v-for="pos in playerRoles(p.accountId)" :key="pos" class="role-badge"><RoleIcon :position="pos" /></span>
+                  <div class="player-header">
+                    <img v-if="playerAvatar(p)" :src="playerAvatar(p)" class="avatar" alt="" @error="onAvatarError(playerAvatar(p))" />
+                    <!-- No avatar, or it failed to load: a generic user icon. -->
+                    <div v-else class="avatar avatar-empty" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" class="avatar-icon">
+                        <circle cx="12" cy="8.5" r="4" fill="currentColor" />
+                        <path d="M4 20.5c0-4.1 3.6-7 8-7s8 2.9 8 7" fill="currentColor" />
+                      </svg>
+                    </div>
+                    <div class="player-info">
+                      <div class="name-row">
+                        <span class="name-main">
+                          <RankMedal
+                            v-if="playerData[p.accountId]?.steamAccount?.seasonRank"
+                            :rank="playerData[p.accountId].steamAccount.seasonRank"
+                            :leaderboard-rank="playerData[p.accountId].steamAccount.seasonLeaderboardRank"
+                          />
+                          <span class="player-name">{{ playerName(p) }}</span>
                         </span>
-                      </template>
+                        <span v-if="dataLoading[p.accountId]" class="skel skel-roles" />
+                        <template v-else-if="playerRoles(p.accountId).length">
+                          <span class="name-divider" aria-hidden="true" />
+                          <span class="role-badges">
+                            <span v-for="pos in playerRoles(p.accountId)" :key="pos" class="role-badge"><RoleIcon :position="pos" /></span>
+                          </span>
+                        </template>
+                      </div>
                     </div>
-                    <div v-if="dataLoading[p.accountId]" class="overall-wr">
-                      <span class="skel skel-line" style="width: 7.5rem" />
-                    </div>
-                    <div
-                      v-else-if="overallRecord(p)"
-                      class="overall-wr"
-                      :title="periodComplete(p.accountId) ? 'Ranked win rate, last 3 months' : 'Ranked win rate over the last 100 games; open Player history to count all of the last 3 months'"
-                    >
-                      <span :class="overallRecord(p).rate >= 50 ? 'wr-good' : 'wr-bad'">{{ overallRecord(p).rate }}%</span>
-                      <span class="record">{{ overallRecord(p).wins.toLocaleString() }}W · {{ overallRecord(p).losses.toLocaleString() }}L</span>
-                      <span v-if="periodLoading[p.accountId]" class="record">counting…</span>
-                      <span v-else-if="!periodComplete(p.accountId)" class="record">· last 100</span>
-                    </div>
-                    <div v-else-if="playerData[p.accountId] && !isPrivate(p)" class="overall-wr">
-                      <span class="record">No ranked games · 3 months</span>
-                    </div>
-                    <!-- Always a second line, so every card's header is the same height. -->
-                    <div v-else class="overall-wr">
-                      <span class="record">{{ !p.accountId || isPrivate(p) ? 'Private profile' : 'No stats available' }}</span>
-                    </div>
-                  </div>
-                  <div v-if="p.accountId" class="profile-links">
-                    <a :href="`https://stratz.com/players/${p.accountId}`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open Stratz profile" aria-label="Open Stratz profile">
-                      <StratzIcon class="profile-logo" />
-                    </a>
-                    <a :href="`https://www.opendota.com/players/${p.accountId}/overview`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open OpenDota profile" aria-label="Open OpenDota profile">
-                      <img :src="OPENDOTA_ICON" class="profile-logo" alt="" />
-                    </a>
-                    <a :href="`https://www.dotabuff.com/players/${p.accountId}`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open Dotabuff profile" aria-label="Open Dotabuff profile">
-                      <img :src="DOTABUFF_ICON" class="profile-logo" alt="" />
-                    </a>
                   </div>
                 </div>
 
@@ -1330,7 +1324,7 @@ watch(
                           <button type="button" class="tm-col" :aria-pressed="view === 'laning'">@ {{ LANE_MINUTE }}:00</button>
                         </th>
                         <th scope="col" class="col-full" :class="{ focus: view === 'full' }" @click="view = 'full'">
-                          <button type="button" class="tm-col" :aria-pressed="view === 'full'">End of Game</button>
+                          <button type="button" class="tm-col" :aria-pressed="view === 'full'">Full Match</button>
                         </th>
                       </tr>
                     </thead>
@@ -1353,12 +1347,17 @@ watch(
                     <span class="skel skel-line" style="width: 6rem; margin-bottom: 0.5rem" />
                     <div class="skel-items"><span v-for="i in 6" :key="i" class="skel skel-item" /></div>
                   </div>
-                  <div v-else-if="itemMap.size && playerItems(p).length" class="section items-section">
-                    <div class="section-label">{{ view === 'laning' ? `Items by ${LANE_MINUTE}:00` : 'Final items' }}</div>
-                    <ItemRow :items="playerItems(p)" :item-map="itemMap" />
+                  <!-- Each item grid with its label; they sit side by side and wrap as the card allows. -->
+                  <div v-else-if="itemMap.size" class="items-sections">
+                    <div v-for="sec in itemSections(p)" :key="sec.key" class="section items-section">
+                      <div class="section-label">{{ sec.label }}</div>
+                      <ItemRow :items="sec.items" :item-map="itemMap" />
+                    </div>
                   </div>
                 </template>
 
+                <!-- The player's history, and their profiles elsewhere, side by side at the foot of the card. -->
+                <div class="history-row">
                 <button
                   class="history-toggle"
                   :aria-expanded="!!historyOpen[cardKey(p)]"
@@ -1369,6 +1368,18 @@ watch(
                     <path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
                   </svg>
                 </button>
+                <div v-if="p.accountId" class="profile-links">
+                  <a :href="`https://stratz.com/players/${p.accountId}`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open Stratz profile" aria-label="Open Stratz profile">
+                    <StratzIcon class="profile-logo" />
+                  </a>
+                  <a :href="`https://www.opendota.com/players/${p.accountId}/overview`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open OpenDota profile" aria-label="Open OpenDota profile">
+                    <img :src="OPENDOTA_ICON" class="profile-logo" alt="" />
+                  </a>
+                  <a :href="`https://www.dotabuff.com/players/${p.accountId}`" target="_blank" rel="noopener noreferrer" class="profile-link" title="Open Dotabuff profile" aria-label="Open Dotabuff profile">
+                    <img :src="DOTABUFF_ICON" class="profile-logo" alt="" />
+                  </a>
+                </div>
+                </div>
 
                 <div v-if="historyOpen[cardKey(p)]" class="history">
                   <div v-if="dataLoading[p.accountId]" class="section" aria-busy="true" aria-label="Loading player history">
@@ -1785,18 +1796,6 @@ watch(
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-/* Starts a new group of chips, after a thin divider. */
-.chips button.chip-divide { position: relative; margin-left: 0.6rem; }
-.chips button.chip-divide::before {
-  content: '';
-  position: absolute;
-  /* Midway across the 0.35rem gap plus the 0.6rem margin. */
-  left: calc(-0.475rem - 0.5px);
-  top: 15%;
-  bottom: 15%;
-  width: 1px;
-  background: var(--color-border, #2e3542);
-}
 .chips button.active { background: rgba(52,191,255,.15); border-color: rgba(52,191,255,.3); color: #34bfff; }
 .chips button:hover:not(.active) { color: var(--color-text); border-color: var(--color-muted, #7a8799); }
 /* The page-level time range picker: centred and a touch larger than the graph chips. */
@@ -1826,7 +1825,7 @@ watch(
 }
 /* The chart grows to the facts card's height. */
 .summary-chart { display: flex; flex-direction: column; min-width: 0; }
-.summary-chart .advantage-chart { flex: 1; }
+.summary-chart :deep(.advantage-chart) { flex: 1; }
 /* Framed like the lane cards, with rows styled after the lane breakdown table. */
 .facts-card {
   padding: 0.75rem 0.85rem;
@@ -1900,7 +1899,7 @@ watch(
   margin-bottom: 1rem;
 }
 .lane-top.with-breakdown .lane-chart { margin-bottom: 0; display: flex; flex-direction: column; }
-.lane-top.with-breakdown .lane-chart .advantage-chart { flex: 1; }
+.lane-top.with-breakdown .lane-chart :deep(.advantage-chart) { flex: 1; }
 .lane-top .lane-side { grid-area: auto; }
 @media (max-width: 1000px) {
   .lane-top.with-breakdown { grid-template-columns: minmax(0, 1fr); }
@@ -1971,13 +1970,21 @@ watch(
 .card-radiant { border-left: 3px solid rgba(75,180,95,.7); background: linear-gradient(90deg, rgba(75,180,95,.05), transparent 40%), #161a24; }
 .card-dire    { border-left: 3px solid rgba(200,60,60,.7); background: linear-gradient(90deg, rgba(200,60,60,.05), transparent 40%), #161a24; }
 
+/* The player, on the right of the banner: avatar, then their name row (medal, name, roles), right-aligned.
+   A smaller avatar and medal keep the banner compact. */
 .player-header {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.6rem;
+  gap: 0.5rem;
+  min-width: 0;
+  margin-left: auto;
+  text-align: right;
 }
+.player-header .player-info { align-items: flex-end; }
+.player-header .name-row,
+.player-header .name-main { justify-content: flex-end; }
+.player-header .avatar { width: 32px; height: 32px; }
+.player-header :deep(.rank-medal) { width: 30px; height: 30px; }
 .avatar {
   align-self: center;
   width: 44px;
@@ -1998,23 +2005,14 @@ watch(
   flex-direction: column;
   gap: 0.2rem;
 }
-/* As tall as a rank medal (42px), so unranked players line up with ranked ones. */
+/* As tall as the (banner-sized) rank medal, so unranked players line up with ranked ones. */
 .name-row {
-  min-height: 42px;
+  min-height: 30px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem 0.4rem;
   min-width: 0;
-}
-.overall-wr {
-  /* One line tall whether it holds text or the loading placeholder. */
-  min-height: 1.5em;
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 .profile-links {
   align-self: flex-start;
@@ -2093,7 +2091,7 @@ watch(
   height: 54px;
   border-radius: 5px;
 }
-.hero-banner-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.hero-banner-text { flex: 1; display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .hero-banner-name {
   font-size: var(--fs-lg);
   font-weight: 700;
@@ -2109,7 +2107,7 @@ watch(
   white-space: nowrap;
 }
 
-/* Stats as rows, @10 and end of game as columns; the column for the current view is lit. */
+/* Stats as rows, @10 and full match as columns; the column for the current view is lit. */
 .tm-table {
   width: 100%;
   margin-top: 0.6rem;
@@ -2175,12 +2173,14 @@ watch(
   white-space: nowrap;
 }
 
+.history-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+.history-row .profile-links { align-self: center; }
 .history-toggle {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  margin-top: 0.75rem;
+  min-width: 0;
   padding: 0.4rem 0.55rem;
   background: transparent;
   border: 1px solid var(--color-border, #2e3542);
@@ -2255,6 +2255,7 @@ watch(
   margin-bottom: 0.5rem;
 }
 .items-section { margin-top: 0.75rem; }
+.items-sections { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 1.25rem; }
 .no-data {
   font-size: var(--fs-sm);
   color: var(--color-muted, #7a8799);
