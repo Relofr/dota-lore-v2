@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, useId } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, useId } from 'vue'
 import { compact, formatTime, heroImage } from '@/utils/matchAnalysis.js'
 import HeroIcon from './HeroIcon.vue'
 import LineKey from './LineKey.vue'
@@ -383,6 +383,11 @@ const eventTypesShown = computed(() => Object.entries(EVENT_TYPES)
   .filter(([type]) => eventsInRange.value.some(e => e.type === type))
   .map(([type, t]) => ({ type, ...t })))
 
+// The longest objective label on this chart, for the tooltip's invisible sizing row.
+const widestEventLabel = computed(() => eventTypesShown.value
+  .map(t => t.label)
+  .reduce((a, b) => (b.length > a.length ? b : a), ''))
+
 // Events within half a minute of the hovered time, for the tooltip.
 const hoverEvents = computed(() => (hover.value == null ? [] : markers.value.filter(m => Math.abs(m.time - hover.value) <= 30)))
 
@@ -414,7 +419,9 @@ const heroSections = computed(() => {
       row.cells[t.s.key] = valueAt({ values: t.values, step: t.s.step }, hover.value)
       row.details[t.s.key] = t.detail?.(hover.value) ?? null
     }
-    const rows = [...heroes.values()]
+    // Highest first by the first measure shown (e.g. damage), as of the hovered moment.
+    const sortKey = perHeroSeries.value[0]?.key
+    const rows = [...heroes.values()].sort((a, b) => (b.cells[sortKey] ?? -Infinity) - (a.cells[sortKey] ?? -Infinity))
     const totals = perHeroSeries.value.map(s => {
       const sum = rows.reduce((acc, r) => acc + (r.cells[s.key] ?? 0), 0)
       return s.format ? s.format(sum) : compact(sum)
@@ -423,10 +430,34 @@ const heroSections = computed(() => {
   }).filter(sec => sec.rows.length)
 })
 
+// The tooltip sits right of the cursor, or left of it when it wouldn't fit, using its measured width
+// (it keeps its natural width, so nothing is squeezed); either way it's kept inside the chart.
+const tooltip = ref(null)
+const tooltipWidth = ref(0)
+// The widest the tooltip has been on this chart, used as its minimum so it never shrinks back as you move
+// along (numbers change width from point to point). Reset when the columns change.
+const tooltipMinWidth = ref(0)
+watch(() => [props.series.map(s => s.key).join(), hiddenHeroes.value.size, width.value], () => { tooltipMinWidth.value = 0 })
+let tooltipObserver = null
+watch(tooltip, el => {
+  tooltipObserver?.disconnect()
+  if (!el) return
+  tooltipObserver = new ResizeObserver(([entry]) => {
+    const w = entry.borderBoxSize?.[0]?.inlineSize ?? el.offsetWidth
+    tooltipWidth.value = w
+    if (w > tooltipMinWidth.value) tooltipMinWidth.value = Math.ceil(w)
+  })
+  tooltipObserver.observe(el)
+})
+onBeforeUnmount(() => tooltipObserver?.disconnect())
+
 const tooltipStyle = computed(() => {
   if (hover.value == null) return {}
   const px = x(hover.value)
-  return px > width.value - (perHeroSeries.value.length ? 60 + perHeroSeries.value.length * 60 : 210) ? { right: `${width.value - px + 10}px` } : { left: `${px + 10}px` }
+  const w = tooltipWidth.value || 180
+  const gap = 10
+  const left = px + gap + w <= width.value ? px + gap : px - gap - w
+  return { left: `${Math.max(0, Math.min(left, width.value - w))}px`, minWidth: tooltipMinWidth.value ? `${tooltipMinWidth.value}px` : null }
 })
 
 const heading = computed(() => (single.value ? props.series[0].label : props.title))
@@ -619,12 +650,17 @@ const summary = computed(() => shown.value
         </g>
       </svg>
 
-      <div v-if="hover != null && (hoverRows.length || heroSections.length)" class="tooltip" :style="tooltipStyle">
+      <div v-if="hover != null && (hoverRows.length || heroSections.length)" ref="tooltip" class="tooltip" :style="tooltipStyle">
         <div class="tt-time">{{ formatTime(hover) }}</div>
+        <div v-if="widestEventLabel" class="tt-event tt-sizer" aria-hidden="true">
+          <span class="key-icon" style="width: 19px" />
+          <span class="tt-event-hero" />
+          <span>{{ widestEventLabel }} · 00:00</span>
+        </div>
         <div v-for="m in hoverEvents" :key="m.key" class="tt-event">
           <img :src="m.icon" class="key-icon" alt="" />
           <HeroIcon :hero="m.hero" class="tt-event-hero" />
-          <span>{{ m.label }} · {{ formatTime(m.time) }}</span>
+          <span class="tt-event-text">{{ m.label }} · {{ formatTime(m.time) }}</span>
         </div>
         <div v-for="r in hoverRows" :key="r.s.key" class="tt-row">
           <LineKey :width="16" :dash="!single && r.s.kind === 'probability' ? PROB_DASH : null" :color="single ? sideColor(r.s, r.v) : r.s.color" />
@@ -856,6 +892,8 @@ const summary = computed(() => shown.value
   border-radius: 6px;
   padding: 0.4rem 0.55rem;
   min-width: 150px;
+  /* Its natural width wherever it is, never squeezed by the chart's edge. */
+  width: max-content;
   z-index: 5;
   font-variant-numeric: tabular-nums;
 }
@@ -890,6 +928,9 @@ const summary = computed(() => shown.value
   white-space: nowrap;
   margin-bottom: 0.15rem;
 }
+/* An invisible copy of the widest objective row: it gives the tooltip that width from the start, so the
+   real rows fit in full and the tooltip doesn't jump wider when one appears. */
+.tt-sizer { height: 0; margin: 0; overflow: hidden; visibility: hidden; }
 .tt-event :deep(img), .tt-event-hero { width: 18px; height: 18px; border-radius: 3px; object-fit: cover; }
 /* Per-team table: a label/icon column, then one right-aligned column per measure. */
 .tt-table {
